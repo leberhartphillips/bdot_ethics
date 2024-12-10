@@ -1,0 +1,1243 @@
+---
+title: "Banded Dotterel Tagging Trial"
+
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: 
+ - name: Luke Eberhart-Hertel
+   orcid: 0000-0001-7311-6088
+   email: luke.eberhart@bi.mpg.de
+   url: https://www.bi.mpg.de/person/115852/2867
+   affiliations:
+     - ref: bk
+ - name: Ailsa Howard
+   affiliations:
+     - ref: ah
+ - name: Tony Habraken
+   affiliations:
+     - ref: th
+ - name: Colin O`Donnell
+   affiliations:
+     - ref: ew
+ - name: Clemens Küpper
+   affiliations:
+     - ref: ck
+ - name: Emma Williams
+   affiliations:
+     - ref: ew
+ - name: Bart Kempenaers
+   affiliations:
+     - ref: bk
+affiliations:
+ - id: bk
+   number: 1
+   name: Department of Ornithology, Max Planck Institute for Biological Intelligence, Seewiesen, Germany
+ - id: ah
+   number: 2
+   name: South Bay Banded Dotterel Project, Kaikoura, New Zealand
+ - id: th
+   number: 2
+   name: Port Waikato Banded Dotterel Project, Port Waikato, New Zealand
+ - id: ew
+   number: 3
+   name: Department of Conservation, Christchurch, New Zealand
+    - id: bk
+   number: 1
+   name: Research Group for Behavioural Genetics and Evolutionary Ecology, Max Planck Institute for Biological Intelligence, Seewiesen, Germany
+format: 
+  html:
+    toc: true
+    code-fold: true
+    code-tools: true
+    self-contained: true
+    highlight-style: github
+    theme: Cosmo
+execute:
+  warning: false
+  cache: true
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+```{r, message=FALSE, results='hide', warning=FALSE, results='hide', cache=FALSE, include=FALSE}
+## Prerequisites
+
+### R packages
+
+# -   The following packages are needed for analysis and can be easily installed from [CRAN](http://cran.r-project.org/) or GitHub by running the following code chunk:
+
+# a vector of all the packages needed in the project
+packages_required_in_project <- c("dbo", "data.table", "apis", "stringr", "glue", 
+                                  "mapview", "sf", "DBI", "tidyverse", "hms", 
+                                  "stringr", "remotes", "googlesheets4", 
+                                  "corrplot", "smatr", "lme4", "broom.mixed", 
+                                  "gtsummary", "RColorBrewer", "rptR", "partR2",
+                                  "multcomp", "effects", "gt", "scales", 
+                                  "colorspace", "showtext", "MuMIn", "here")
+
+# of the required packages, check if some need to be installed
+new.packages <- 
+  packages_required_in_project[!(packages_required_in_project %in% 
+                                   installed.packages()[,"Package"])]
+
+# remotes::install_github("mpio-be/dbo")
+# remotes::install_github("mpio-be/apis")
+
+# install all packages that are not locally available
+if(length(new.packages)) install.packages(new.packages)
+
+# load all the packages into the current R session
+lapply(packages_required_in_project, require, character.only = TRUE)
+
+# set the home directory to where the project is locally based (i.e., to find 
+# the relevant datasets to import, etc.
+here::set_here()
+```
+
+```{r, message=FALSE, results='hide', warning=FALSE, include=FALSE}
+### Plotting themes
+
+# -   The following plotting themes, colors, and typefaces are used throughout the project:
+
+# Find fonts from computer that you want. Use regular expressions to do this
+# For example, load all fonts that are 'verdana' or 'Verdana'
+extrafont::font_import(pattern = "[V/v]erdana", prompt = FALSE) 
+
+# check which fonts were loaded
+extrafont::fonts()
+extrafont::fonttable()
+extrafont::loadfonts() # load these into R
+
+# define the plotting theme to be used in subsequent ggplots
+luke_theme <- 
+  theme_bw() +
+  theme(
+    text = element_text(family = "Verdana"),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8),
+    axis.title.x = element_text(size = 10),
+    axis.text.x  = element_text(size = 8), 
+    axis.title.y = element_text(size = 10),
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(size = 10),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(linewidth = 0.5, colour = "grey40"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(linetype = "solid", colour = "grey"),
+    legend.position.inside = c(0.1, 0.9)
+  )
+```
+
+# Body Condition Dynamics
+### Data import and wrangle
+```{r}
+### import and wrangle ----
+# 2024 data 
+# establish a connection to the entire database (i.e., that I have access to)
+con = dbcon()
+
+# connect to the FIELD_2024_BADOatNZ local database
+dbExecute(con, "USE FIELD_2024_BADOatNZ")
+
+# query to select everything from the "incoming" table
+caps_2024 <-
+  dbq(con, "SELECT * FROM CAPTURES") %>% 
+  filter(age != "J") %>% 
+  rowwise() %>%
+  mutate(time = as_hms(min(cap_start, caught, released, na.rm = TRUE))) %>% 
+    mutate(UL = ifelse(is.na(UL) | UL == "" | UL == "X", "XX", UL),
+           LL = ifelse(is.na(LL) | LL == "" | LL == "X", "XX", LL),
+           UR = ifelse(is.na(UR) | UR == "" | UR == "X", "XX", UR),
+           LR = ifelse(is.na(LR) | LR == "" | LR == "X", "XX", LR)) %>% 
+    mutate(UL = ifelse(UL == "M", "MX", UL),
+           UR = ifelse(UR == "M", "MX", UR)) %>% 
+  mutate(code = paste0(UL,".", LL, "|", UR,".", LR)) %>% 
+  mutate(code = str_remove_all(code, ",")) %>% 
+  dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, total_head, wing, wt_w_tag, tag_action, tag_id) %>%
+  # remove pre-nesting females (weights are confounded by oogenisis)
+  filter(ring != "CP19336" & weight != 66.6) %>% 
+  filter(ring != "CP9088" & weight != 75.2) %>% 
+  filter(ring != "CP16483" & weight != 63.8)# %>% 
+  # filter(ring == "CP16134")
+
+dbq(con, "SELECT * FROM CAPTURES") %>% filter(ring == "CP9075")
+
+# pre-2024 data 
+caps_pre2024 <-
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
+             sheet = "Captures", col_types = "c") %>% 
+  dplyr::filter(age == "A") %>% 
+  filter(species == "BADO") %>% 
+  filter(!is.na(date)) %>% 
+  mutate(date = paste(year, ifelse(nchar(date) == 3,
+                                   substring(date, first = 2, last = 3),
+                                   substring(date, first = 3, last = 4)),
+                      ifelse(nchar(date) == 3,
+                             substring(date, first = 1, last = 1),
+                             substring(date, first = 1, last = 2)),
+                      sep = "-") %>% as.Date()) %>% 
+  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
+  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>%
+  mutate(left_tarsus = ifelse(ring == "CP9066" & left_tarsus == 20.4, 30.4, left_tarsus),
+         right_tarsus = ifelse(ring == "CP9066" & right_tarsus == 20.3, 30.3, right_tarsus)) %>% 
+  mutate(left_tarsus = as.numeric(left_tarsus),
+         right_tarsus = as.numeric(right_tarsus),
+         left_wing = as.numeric(left_wing),
+         right_wing = as.numeric(right_wing),
+         weight = as.numeric(weight),
+         bill = as.numeric(bill)) %>% 
+  mutate(tarsus = rowMeans(cbind(left_tarsus, right_tarsus), na.rm = TRUE),
+         wing = rowMeans(cbind(left_wing, right_wing), na.rm = TRUE)) %>% 
+  rename(culmen = bill, 
+         tag_id = tag,
+         nest_id = ID) %>% 
+  dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, wing, tag_id)
+
+colour_band = 0.08
+metal_band = 0.16
+
+# bind together
+all_caps <-
+  bind_rows(caps_2024, caps_pre2024) %>% 
+  arrange(ring, date, time) %>% 
+  mutate(tag = ifelse(is.na(tag_id) | nchar(tag_id) < 2, 0, 1)) %>% 
+  group_by(ring) %>% 
+  mutate(culmen = mean(culmen, na.rm = TRUE), 
+         tarsus = mean(tarsus, na.rm = TRUE), 
+         total_head = mean(total_head, na.rm = TRUE), 
+         wing = mean(wing, na.rm = TRUE)) %>% 
+  mutate(weight = weight - ((4 * colour_band) + metal_band))
+
+# tag deployment information
+tag_info <- 
+  read.csv("/Users/leberhart/ownCloud/kemp_projects/bdot/data/field/Kaikoura_tag_and_control_weights_Luke_2021_2022.csv") %>% 
+  dplyr::select(ring, tag, tag_type, treatment_group) %>% 
+  filter(tag != 0) %>% 
+  distinct() %>% 
+  rename(tag_id = tag) %>% 
+  mutate(tag_id = as.character(tag_id))
+
+all_caps_KK <- 
+  all_caps %>% 
+  filter(site == "KK") %>% 
+  left_join(., tag_info, by = c("ring", "tag_id")) %>% 
+  group_by(ring) %>% 
+  mutate(tag_type = ifelse(is.na(tag_type), first(na.omit(tag_type)), tag_type),
+         treatment_group = ifelse(is.na(treatment_group), first(na.omit(treatment_group)), treatment_group)) %>%
+  ungroup() %>% 
+  mutate(treatment_group = ifelse(is.na(treatment_group) & (is.na(tag_id) | tag_id == "0"), "control", 
+                                  ifelse(is.na(treatment_group) & !is.na(tag_id), "tagged", treatment_group))) %>% 
+  
+  ungroup() %>% 
+  mutate(tag_type = ifelse(tag_type == "2g_tag", "PTT", 
+                           ifelse(tag_type == "1.3g_tag", "GPS", tag_type))) %>% 
+  mutate(tag_type = ifelse(treatment_group == "control", "control", tag_type)) %>% 
+  mutate(tag_type = ifelse(tag_id == "07EC" & is.na(tag_type), "Druid", tag_type)) %>% 
+  mutate(tag_type = ifelse(tag_id == "21107" & is.na(tag_type), "GPS", tag_type)) %>%
+  mutate(tag_type = ifelse(ring == "CP9097" & year(date) == 2022, "GPS", tag_type)) %>% 
+  mutate(treatment_group = ifelse(ring == "CP9097" & year(date) == 2022, "tagged", treatment_group)) %>% 
+  mutate(code = ifelse(ring == "CP9075", "XX.RR|MX.BB", 
+                       ifelse(ring == "CP16614", "XX.RB|MX.WB", code))) %>% 
+  filter(tag_type != "Druid")
+
+saveRDS(all_caps_KK, "ethics_trial/data/all_caps_KK.rds")
+```
+
+### PCA of structural traits
+```{r}
+#### check most relevent structural traits with PCA ----
+# PCA of static body structural measurements (culmen, tarsus, wing)
+static_measures_pca_KK <-
+  all_caps_KK %>% 
+  group_by(ring) %>% 
+  arrange(date, time) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  dplyr::select(culmen, tarsus, wing) %>%
+  na.omit() %>% 
+  princomp()
+
+# check the PCA results
+summary(static_measures_pca_KK)
+biplot(static_measures_pca_KK, cex = 0.7)
+
+# bind PC scores to the original dataframe
+all_caps_pca_KK <-
+  all_caps_KK %>% 
+  group_by(ring) %>% 
+  arrange(date, time) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  dplyr::select(ring, date, time, culmen, tarsus, wing, weight) %>%
+  bind_cols(., static_measures_pca_KK$scores[, 1], static_measures_pca_KK$scores[, 2], static_measures_pca_KK$scores[, 3]) %>% 
+  rename(structure_pc1 = `...8`,
+         structure_pc2 = `...9`,
+         structure_pc3 = `...10`) %>% 
+  na.omit()
+
+# check correlations of traits with weight to determine best trait to use for SMI
+all_caps_pca_KK %>% 
+  mutate(log_weight = log(weight),
+         log_culmen = log(culmen),
+         log_tarsus = log(tarsus),
+         log_wing = log(wing)) %>%
+  dplyr::select(log_weight, log_culmen, log_tarsus, log_wing, structure_pc1, structure_pc2, structure_pc3) %>% 
+  cor() %>% 
+  corrplot(type = "upper", method = "number", tl.srt = 45)
+
+# plots
+ggplot(all_caps_pca_KK, 
+       aes(x = structure_pc1, y = weight)) + 
+  geom_point() + 
+  labs(x = "PC1", y = "Body Mass") + 
+  theme_minimal()
+
+ggplot(all_caps_pca_KK, 
+       aes(x = structure_pc2, y = weight)) + 
+  geom_point() + 
+  labs(x = "PC2", y = "Body Mass") + 
+  theme_minimal()
+
+ggplot(all_caps_pca_KK, 
+       aes(x = structure_pc3, y = weight)) + 
+  geom_point() + 
+  labs(x = "PC3", y = "Body Mass") + 
+  theme_minimal()
+
+ggplot(all_caps_pca_KK, 
+       aes(x = wing, y = weight)) + 
+  geom_point() + 
+  labs(x = "wing length", y = "Body Mass") + 
+  theme_minimal()
+
+ggplot(all_caps_pca_KK, 
+       aes(x = wing, y = tarsus)) + 
+  geom_point() + 
+  labs(x = "tarsus length", y = "Body Mass") + 
+  theme_minimal()
+
+```
+
+### Scaled Mass Index wrangle
+```{r}
+#### wrangle scaled mass index ("smi", sensu Peig & Green) ----
+
+# average all repeated measures of structural traits for each bird
+# (i.e., variation within individuals for these traits is assumed to be 
+# observer/instrument error)
+all_caps_KK_ <- 
+  all_caps_KK %>% 
+  group_by(ring) %>% 
+  mutate(culmen = mean(culmen, na.rm = TRUE), 
+         tarsus = mean(tarsus, na.rm = TRUE), 
+         wing = mean(wing, na.rm = TRUE)) 
+
+# determine which structural trait to use (see text in Peig and Green after Eq. 2
+# "...We recommend the use of thatsingle L variable which has the strongest 
+# correlation with M on a log-log scale, since this is likely to be the L that 
+# best explains that fraction of mass associated with structural size")
+cor.test(log(all_caps_KK_$tarsus), log(all_caps_KK_$weight)) # r = 0.118
+cor.test(log(all_caps_KK_$wing), log(all_caps_KK_$weight)) # r = 0.208
+cor.test(log(all_caps_KK_$culmen), log(all_caps_KK_$weight)) # r = 0.117
+
+# conclude to use wing for SMI transformation because it has the largest r and 
+# based on the PCA investigation above, wing did just as good as PC1 when 
+# explaining variation in weight
+
+# estimate the slope of the log-weight and log-wing SMA regression
+weight_wing_sma_slope <- coef(sma(log(all_caps_KK_$weight) ~ log(all_caps_KK_$wing)))[2]
+
+# calculate the average sizes of structural traits
+avg_wing <- 
+  all_caps_KK_ %>% 
+  pull(wing) %>% 
+  mean(., na.rm = TRUE)
+
+scaledMassIndex <-
+  function(x, y, x.0 = mean(x)) {
+    require(smatr)
+    require(magrittr)
+    require(MASS)
+    require(data.table)
+    logM.ols <- lm(log(y) ~ log(x))
+    logM.rob <- rlm(log(y) ~ log(x), method = "M")
+    b.msa.ols <- coef(sma(log(y) ~ log(x)))[2]
+    b.msa.rob <- coef(sma(log(y) ~ log(x), robust = T))[2]
+    SMI.ols <- y * (x.0 / x) ^ b.msa.ols
+    SMI.rob <- y * (x.0 / x) ^ b.msa.rob
+    res <- data.frame(SMI.ols, SMI.rob, x, y)
+    pred.DT <-
+      data.table(x = seq(min(x), max(x), length = 100)) %>%
+      .[, y.ols := predict(logM.ols, newdata = .) %>% exp] %>%
+      .[, y.rob := predict(logM.rob, newdata = .) %>% exp]
+    attr(res, "b.msa") <- c(ols = b.msa.ols, rob = b.msa.rob)
+    return(res)
+  }
+
+smi_ <- 
+  scaledMassIndex(x = all_caps_KK_ %>% 
+                    ungroup() %>% 
+                    dplyr::select(weight, wing) %>% 
+                    na.omit() %>% 
+                    pull(wing), 
+                  y = all_caps_KK_ %>% 
+                    ungroup() %>% 
+                    dplyr::select(weight, wing) %>% 
+                    na.omit() %>% 
+                    pull(weight))
+
+# calculate scaled mass index for full dataset (see Eq 2 of Peig and Green)
+all_caps_KK_smi <-
+  all_caps_KK_  %>% 
+  filter(!is.na(weight)) %>% 
+  bind_cols(., smi_) %>% 
+  mutate(smi_wing = weight * (avg_wing/wing)^weight_wing_sma_slope) %>% 
+  dplyr::select(smi_wing, weight, date, tag_type, treatment_group, ring, SMI.ols, SMI.rob) %>% 
+  na.omit() %>% 
+  # scale date variable to aid interpretation of model intercept
+  mutate(date_ = as.numeric(scale(date, center = TRUE, scale = FALSE)))
+
+ggplot(all_caps_KK_smi, 
+       aes(x = smi_wing, y = SMI.rob)) + 
+  geom_point() + 
+  labs(x = "smi_wing", y = "SMI.ols") + 
+  theme_minimal()
+```
+
+### Scaled Mass Index temporal model
+```{r}
+#### mixed effects regression ----
+# smi_wing_lmer <-
+#   lmer(smi_wing ~ date_ + tag_type + (1 | ring),
+#        data = all_caps_KK_smi)
+
+smi_wing_lmer_ols <-
+  lmer(SMI.ols ~ date_ + tag_type + (1 | ring),
+       data = all_caps_KK_smi)
+
+# smi_wing_lmer_rob <-
+#   lmer(SMI.rob ~ date_ + tag_type + (1 | ring),
+#        data = all_caps_KK_smi)
+
+# Derive confidence intervals of effect sizes from parametric bootstrapping
+# tidy_smi_wing_lmer <-
+#   tidy(smi_wing_lmer, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+tidy_smi_wing_lmer_ols <-
+  tidy(smi_wing_lmer_ols, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+# tidy_smi_wing_lmer_rob <-
+#   tidy(smi_wing_lmer_rob, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+# run rptR to obtain repeatabilities of random effects
+# rpt_smi_wing_lmer <-
+#   rpt(smi_wing ~ date_ + tag_type + (1 | ring),
+#       grname = c("ring", "Fixed"),
+#       data = all_caps_KK_smi,
+#       datatype = "Gaussian",
+#       nboot = 1000, npermut = 1000, ratio = TRUE,
+#       adjusted = TRUE, ncores = 4, parallel = TRUE)
+
+rpt_smi_wing_lmer_ols <-
+  rpt(SMI.ols ~ date_ + tag_type + (1 | ring),
+      grname = c("ring", "Fixed"),
+      data = all_caps_KK_smi,
+      datatype = "Gaussian",
+      nboot = 1000, npermut = 1000, ratio = TRUE,
+      adjusted = TRUE, ncores = 4, parallel = TRUE)
+
+# rpt_smi_wing_lmer__ <-
+#   rpt(SMI.rob ~ date_ + tag_type + (1 | ring),
+#       grname = c("ring", "Fixed"),
+#       data = all_caps_KK_smi,
+#       datatype = "Gaussian",
+#       nboot = 1000, npermut = 1000, ratio = TRUE,
+#       adjusted = TRUE, ncores = 4, parallel = TRUE)
+
+# run partR2 on each model to obtain marginal R2, parameter estimates, and beta
+# weights
+# R2m_smi_wing_lmer <-
+#   partR2(smi_wing_lmer,
+#          partvars = c("date_",
+#                       "tag_type"),
+#          R2_type = "marginal",
+#          nboot = 1000,
+#          CI = 0.95,
+#          max_level = 1)
+
+R2m_smi_wing_lmer_ols <-
+  partR2(smi_wing_lmer_ols,
+         partvars = c("date_",
+                      "tag_type"),
+         R2_type = "marginal",
+         nboot = 1000,
+         CI = 0.95,
+         max_level = 1)
+
+# R2m_smi_wing_lmer__ <-
+#   partR2(smi_wing_lmer__,
+#          partvars = c("date_",
+#                       "tag_type"),
+#          R2_type = "marginal",
+#          nboot = 1000,
+#          CI = 0.95,
+#          max_level = 1)
+
+# R2c_smi_wing_lmer <-
+#   partR2(smi_wing_lmer,
+#          partvars = c("date_",
+#                       "tag_type"),
+#          R2_type = "conditional",
+#          nboot = 1000,
+#          CI = 0.95,
+#          max_level = 1)
+
+R2c_smi_wing_lmer_ols <-
+  partR2(smi_wing_lmer_ols,
+         partvars = c("date_",
+                      "tag_type"),
+         R2_type = "conditional",
+         nboot = 1000,
+         CI = 0.95,
+         max_level = 1)
+
+# R2c_smi_wing_lmer__ <-
+#   partR2(smi_wing_lmer__,
+#          partvars = c("date_",
+#                       "tag_type"),
+#          R2_type = "conditional",
+#          nboot = 1000,
+#          CI = 0.95,
+#          max_level = 1)
+
+# stats_smi_wing_lmer <-
+#   list(mod = smi_wing_lmer,
+#        tidy = tidy_smi_wing_lmer,
+#        rptR = rpt_smi_wing_lmer,
+#        partR2m = R2m_smi_wing_lmer,
+#        partR2c = R2c_smi_wing_lmer,
+#        data = all_caps_KK_smi)
+
+stats_smi_wing_lmer_ols <-
+  list(mod = smi_wing_lmer_ols,
+       tidy = tidy_smi_wing_lmer_ols,
+       rptR = rpt_smi_wing_lmer_ols,
+       partR2m = R2m_smi_wing_lmer_ols,
+       partR2c = R2c_smi_wing_lmer_ols,
+       data = all_caps_KK_smi)
+
+# stats_smi_wing_lmer__ <-
+#   list(mod = smi_wing_lmer__,
+#        tidy = tidy_smi_wing_lmer__,
+#        rptR = rpt_smi_wing_lmer__,
+#        partR2m = R2m_smi_wing_lmer__,
+#        partR2c = R2c_smi_wing_lmer__,
+#        data = all_caps_KK_smi)
+
+# summary(glht(smi_wing_lmer))
+summary(glht(smi_wing_lmer_ols))
+# summary(glht(smi_wing_lmer__))
+
+#### Table of effect sizes ----
+# Retrieve sample sizes
+sample_sizes <-
+  all_caps_KK_smi %>%
+  ungroup() %>%
+  summarise(Individual = n_distinct(ring),
+            Observations = nrow(.))
+
+sample_sizes <-
+  as.data.frame(t(as.data.frame(sample_sizes))) %>%
+  rownames_to_column("term") %>%
+  rename(estimate = V1) %>%
+  mutate(stat = "n")
+
+# clean model component names
+mod_comp_names <-
+  data.frame(comp_name = c("Intercept (scaled mass index)",
+                           "Within ind. temporal change",
+                           "1.3g GPS tag",
+                           "1.8g PTT tag",
+                           "Total Marginal \U1D479\U00B2",
+                           "Within ind. temporal change",
+                           "Tag type",
+                           "Total Conditional \U1D479\U00B2",
+                           "Individual",
+                           "Residual",
+                           "Individual",
+                           "Residual",
+                           "Individuals",
+                           "Observations"))
+
+# Fixed effect sizes (non-standardized)
+fixefTable <-
+  stats_smi_wing_lmer_ols$tidy %>%
+  dplyr::filter(effect == "fixed") %>%
+  dplyr::select(term, estimate, conf.low, conf.high) %>%
+  as.data.frame() %>%
+  mutate(stat = "fixed")
+
+# Fixed effect sizes (standardized)
+fixef_bw_Table <-
+  stats_smi_wing_lmer_ols$partR2m$BW %>%
+  as.data.frame() %>%
+  mutate(stat = "fixed_bw") %>%
+  rename(conf.low = CI_lower,
+         conf.high = CI_upper)
+
+# Semi-partial R2 estimates
+R2Table <-
+  bind_rows(stats_smi_wing_lmer_ols$partR2m$R2,
+            stats_smi_wing_lmer_ols$partR2c$R2[1,]) %>%
+  dplyr::select(term, estimate, CI_lower, CI_upper) %>%
+  as.data.frame() %>%
+  mutate(stat = "partR2") %>%
+  rename(conf.low = CI_lower,
+         conf.high = CI_upper)
+
+# Random effects variances
+ranefTable <-
+  stats_smi_wing_lmer_ols$tidy %>%
+  dplyr::filter(effect == "ran_pars") %>%
+  dplyr::select(group, estimate, conf.low, conf.high) %>%
+  as.data.frame() %>%
+  mutate(stat = "rand") %>%
+  rename(term = group) %>%
+  mutate(estimate = estimate^2,
+         conf.high = conf.high^2,
+         conf.low = conf.low^2)
+
+# Adjusted repeatabilities
+coefRptTable <-
+  stats_smi_wing_lmer_ols$rptR$R_boot %>%
+  dplyr::select(-Fixed) %>%
+  mutate(residual = 1 - rowSums(.)) %>%
+  apply(., 2,
+        function(x) c(mean (x), quantile (x, prob = c(0.025, 0.975)))) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  rename(estimate = V1,
+         conf.low = `2.5%`,
+         conf.high = `97.5%`) %>%
+  mutate(stat = "RptR")
+
+# Store all parameters into a single table and clean it up
+allCoefs_mod <-
+  bind_rows(fixefTable[1,], 
+            fixef_bw_Table,
+            R2Table,
+            ranefTable,
+            coefRptTable,
+            sample_sizes) %>%
+  bind_cols(.,
+            mod_comp_names) %>%
+  mutate(coefString = ifelse(!is.na(conf.low),
+                             paste0("[",
+                                    round(conf.low, 2), ", ",
+                                    round(conf.high, 2), "]"),
+                             NA),
+         effect = c(rep("Fixed effects \U1D6FD (standardized)", nrow(fixefTable[1,])),
+                    rep("Fixed effects \U1D6FD (standardized)", nrow(fixef_bw_Table)),
+                    rep("Partitioned \U1D479\U00B2", nrow(R2Table)),
+                    rep("Random effects \U1D70E\U00B2", nrow(ranefTable)),
+                    rep("Adjusted repeatability \U1D45F", nrow(coefRptTable)),
+                    rep("Sample sizes \U1D45B", nrow(sample_sizes)))) %>%
+  dplyr::select(effect, everything())
+
+# draw gt table
+smi_wing_lmer_table <-
+  allCoefs_mod %>%
+  dplyr::select(effect, comp_name, estimate, coefString) %>%
+  gt(rowname_col = "row",
+     groupname_col = "effect") %>%
+  cols_label(comp_name = html("<i> </i>"),
+             estimate = "Mean estimate",
+             coefString = "95% confidence interval") %>%
+  fmt_number(columns = c(estimate),
+             rows = 1:12,
+             decimals = 2,
+             use_seps = FALSE) %>%
+  fmt_number(columns = c(estimate),
+             rows = 13:14,
+             decimals = 0,
+             use_seps = FALSE) %>%
+  sub_missing(columns = 1:4,
+              missing_text = "") %>%
+  cols_align(align = "left",
+             columns = c(comp_name)) %>%
+  tab_options(row_group.font.weight = "bold",
+              row_group.background.color = brewer.pal(9,"Greys")[3],
+              table.font.size = 12,
+              data_row.padding = 3,
+              row_group.padding = 4,
+              summary_row.padding = 2,
+              column_labels.font.size = 14,
+              row_group.font.size = 12,
+              table.width = pct(70))
+
+smi_wing_lmer_table
+```
+
+### Scaled Mass Index sequential measures model
+```{r}
+#### sequence of measures ----
+# determine the first obs for birds that had repeated measures
+first_obs <- 
+  stats_smi_wing_lmer_ols$data %>%
+  group_by(ring) %>% 
+  # mutate(n_obs = n()) %>% 
+  # filter(n_obs > 1) %>% 
+  filter(year(date) > 2020) %>% 
+  arrange(ring, date) %>% 
+  # group_by(ring) %>% 
+  slice(1) %>% 
+  rename(first_smi_wing = SMI.ols, 
+         first_weight = weight,
+         first_date = date) %>% 
+  dplyr::select(ring, first_date, first_weight, first_smi_wing, tag_type, treatment_group)
+
+# wrangle the repeated measures data
+repeated_measures <-
+  stats_smi_wing_lmer_ols$data %>%
+  group_by(ring) %>% 
+  mutate(n_obs = n()) %>% 
+  filter(n_obs > 1) %>% 
+  filter(year(date) > 2020) %>% 
+  arrange(ring, date) %>% 
+  group_by(ring) %>% 
+  slice(2) %>% 
+  rename(second_smi_wing = SMI.ols,
+         second_weight = weight,
+         second_date = date) %>% 
+  dplyr::select(ring, second_date, second_weight, second_smi_wing, tag_type, treatment_group) %>% 
+  full_join(first_obs, ., join_by(ring, tag_type, treatment_group)) %>%
+  mutate(smi_wing_diff = second_smi_wing - first_smi_wing,
+         date_diff = second_date - first_date)%>%
+  pivot_longer(
+    cols = c(first_date, first_smi_wing, first_weight,
+             second_date, second_smi_wing, second_weight),
+    names_to = c("measure", ".value"),
+    names_pattern = "(first|second)_(.*)"
+  ) %>% 
+  filter(!is.na(smi_wing)) %>% 
+  dplyr::select(-smi_wing_diff)
+
+repeated_measures %>% 
+  group_by(tag_type) %>% 
+  summarise(n = n_distinct(ring))
+
+#### stats ----
+smi_wing_lmer_seq <- 
+  lmer(smi_wing ~ tag_type * measure + (1 | ring), 
+       data = repeated_measures)
+
+# Derive confidence intervals of effect sizes from parametric bootstrapping
+tidy_smi_wing_lmer_seq <-
+  tidy(smi_wing_lmer_seq, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+# run rptR to obtain repeatabilities of random effects
+rpt_smi_wing_lmer_seq <-
+  rpt(smi_wing ~ tag_type * measure + (1 | ring),
+      grname = c("ring", "Fixed"),
+      data = repeated_measures,
+      datatype = "Gaussian",
+      nboot = 1000, npermut = 1000, ratio = TRUE,
+      adjusted = TRUE, ncores = 4, parallel = TRUE)
+
+# run partR2 on each model to obtain marginal R2, parameter estimates, and beta
+# weights
+R2m_smi_wing_lmer_seq <-
+  partR2(smi_wing_lmer_seq,
+         partvars = c("tag_type",
+                      "measure"),
+         R2_type = "marginal",
+         nboot = 1000,
+         CI = 0.95,
+         max_level = 1)
+
+R2c_smi_wing_lmer_seq <-
+  partR2(smi_wing_lmer_seq,
+         partvars = c("tag_type",
+                      "measure"),
+         R2_type = "conditional",
+         nboot = 1000,
+         CI = 0.95,
+         max_level = 1)
+
+stats_smi_wing_lmer_seq <-
+  list(mod = smi_wing_lmer_seq,
+       tidy = tidy_smi_wing_lmer_seq,
+       rptR = rpt_smi_wing_lmer_seq,
+       partR2m = R2m_smi_wing_lmer_seq,
+       partR2c = R2c_smi_wing_lmer_seq,
+       data = repeated_measures)
+
+summary(glht(smi_wing_lmer_seq))
+
+#### Table of effect sizes ----
+# Retrieve sample sizes
+sample_sizes <-
+  stats_smi_wing_lmer_seq$data %>%
+  ungroup() %>%
+  summarise(Individual = n_distinct(ring),
+            Observations = nrow(.))
+
+sample_sizes <-
+  as.data.frame(t(as.data.frame(sample_sizes))) %>%
+  rownames_to_column("term") %>%
+  rename(estimate = V1) %>%
+  mutate(stat = "n")
+
+# clean model component names
+mod_comp_names <-
+  data.frame(comp_name = c("Control group SMI (g; baseline intercept))",
+                           "Relative SMI (g) of 1.3g GPS tag group",
+                           "Relative SMI (g) of 1.8g PTT tag group",
+                           "\u0394 SMI (g) in control group",
+                           "Additional \u0394 SMI (g) for 1.3g GPS tag",
+                           "Additional \u0394 SMI (g) for 1.8g PTT tag",
+                           "Total Marginal \U1D479\U00B2",
+                           "Tag type",
+                           "Measurement sequence",
+                           "Total Conditional \U1D479\U00B2",
+                           "Individual",
+                           "Residual",
+                           "Individual",
+                           "Residual",
+                           "Individuals",
+                           "Observations"))
+
+# Fixed effect sizes (non-standardized)
+fixefTable <-
+  stats_smi_wing_lmer_seq$tidy %>%
+  dplyr::filter(effect == "fixed") %>%
+  dplyr::select(term, estimate, conf.low, conf.high) %>%
+  as.data.frame() %>%
+  mutate(stat = "fixed")
+
+# Fixed effect sizes (standardized)
+fixef_bw_Table <-
+  stats_smi_wing_lmer_seq$partR2m$BW %>%
+  as.data.frame() %>%
+  mutate(stat = "fixed_bw") %>%
+  rename(conf.low = CI_lower,
+         conf.high = CI_upper)
+
+# Semi-partial R2 estimates
+R2Table <-
+  bind_rows(stats_smi_wing_lmer_seq$partR2m$R2,
+            stats_smi_wing_lmer_seq$partR2c$R2[1,]) %>%
+  dplyr::select(term, estimate, CI_lower, CI_upper) %>%
+  as.data.frame() %>%
+  mutate(stat = "partR2") %>%
+  rename(conf.low = CI_lower,
+         conf.high = CI_upper)
+
+# Random effects variances
+ranefTable <-
+  stats_smi_wing_lmer_seq$tidy %>%
+  dplyr::filter(effect == "ran_pars") %>%
+  dplyr::select(group, estimate, conf.low, conf.high) %>%
+  as.data.frame() %>%
+  mutate(stat = "rand") %>%
+  rename(term = group) %>%
+  mutate(estimate = estimate^2,
+         conf.high = conf.high^2,
+         conf.low = conf.low^2)
+
+# Adjusted repeatabilities
+coefRptTable <-
+  stats_smi_wing_lmer_seq$rptR$R_boot %>%
+  dplyr::select(-Fixed) %>%
+  mutate(residual = 1 - rowSums(.)) %>%
+  apply(., 2,
+        function(x) c(mean (x), quantile (x, prob = c(0.025, 0.975)))) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  rename(estimate = V1,
+         conf.low = `2.5%`,
+         conf.high = `97.5%`) %>%
+  mutate(stat = "RptR")
+
+# Store all parameters into a single table and clean it up
+allCoefs_mod <-
+  bind_rows(fixefTable[1,], 
+            fixef_bw_Table,
+            R2Table,
+            ranefTable,
+            coefRptTable,
+            sample_sizes) %>%
+  bind_cols(.,
+            mod_comp_names) %>%
+  mutate(coefString = ifelse(!is.na(conf.low),
+                             paste0("[",
+                                    round(conf.low, 2), ", ",
+                                    round(conf.high, 2), "]"),
+                             NA),
+         effect = c(rep("Fixed effects \U1D6FD (standardized)", nrow(fixefTable[1,])),
+                    rep("Fixed effects \U1D6FD (standardized)", nrow(fixef_bw_Table)),
+                    rep("Partitioned \U1D479\U00B2", nrow(R2Table)),
+                    rep("Random effects \U1D70E\U00B2", nrow(ranefTable)),
+                    rep("Adjusted repeatability \U1D45F", nrow(coefRptTable)),
+                    rep("Sample sizes \U1D45B", nrow(sample_sizes)))) %>%
+  dplyr::select(effect, everything())
+
+# draw gt table
+smi_wing_lmer_seq_table <-
+  allCoefs_mod %>%
+  dplyr::select(effect, comp_name, estimate, coefString) %>%
+  gt(rowname_col = "row",
+     groupname_col = "effect") %>%
+  cols_label(comp_name = html("<i> </i>"),
+             estimate = "Mean estimate",
+             coefString = "95% confidence interval") %>%
+  fmt_number(columns = c(estimate),
+             rows = 1:14,
+             decimals = 2,
+             use_seps = FALSE) %>%
+  fmt_number(columns = c(estimate),
+             rows = 15:16,
+             decimals = 0,
+             use_seps = FALSE) %>%
+  sub_missing(columns = 1:4,
+              missing_text = "") %>%
+  cols_align(align = "left",
+             columns = c(comp_name)) %>%
+  tab_options(row_group.font.weight = "bold",
+              row_group.background.color = brewer.pal(9,"Greys")[3],
+              table.font.size = 12,
+              data_row.padding = 3,
+              row_group.padding = 4,
+              summary_row.padding = 2,
+              column_labels.font.size = 14,
+              row_group.font.size = 12,
+              table.width = pct(75))
+
+smi_wing_lmer_seq_table
+
+# Load the MuMIn package for R-squared calculation
+library(MuMIn)
+
+# Calculate R-squared values
+r.squared <- r.squaredGLMM(smi_wing_lmer_seq)
+print(r.squared)
+
+#### plotting ----
+bdot_treatment_group_facets <- c('GPS' = "1.3g GPS tag", 
+                                 'PTT' = "1.8g PTT tag", 
+                                 'control' = "control")
+
+custom_colors <- brewer.pal(9, "Pastel1")[c(9, 2, 3)]
+
+# Add Google font Lato
+font_add_google("Lato", "lato")
+
+# Automatically use showtext to render text
+showtext_auto()
+
+repeated_measures_ <- 
+  repeated_measures %>%
+  mutate(x_line = ifelse(measure == "first", as.numeric(factor(measure)) + 0.15,
+                         ifelse(measure == "second", as.numeric(factor(measure)) - 0.15, NA)),
+         x_point = ifelse(measure == "first", as.numeric(factor(measure)), 
+                          ifelse(measure == "second", as.numeric(factor(measure)), NA)))
+
+ggplot(data = repeated_measures_) + 
+  geom_line(aes(x = x_line, y = smi_wing, group = ring), color = "grey40", alpha = 0.5) + 
+  geom_jitter(size = 6, aes(x = x_point, y = smi_wing, fill = tag_type, shape = measure), 
+             shape = 21, color = "grey40", alpha = 0.75, width = 0.075) +
+  scale_shape_manual(values = c(21, 24)) +
+  scale_fill_manual(values = custom_colors) +
+  facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
+  theme(legend.position = "none",
+        text = element_text(family = "lato"),
+        axis.title = element_text(size = 11, colour = "grey40"),
+        axis.ticks = element_blank(),
+        # axis.ticks.length = unit(0.1, "cm"),
+        axis.text = element_text(size = 10, colour = "grey40"),
+        axis.title.y = element_text(size = 12),
+        axis.text.y = element_text(size = 10),
+        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(fill = 'transparent', color = NA), 
+        strip.background = element_rect(fill = 'transparent', color = NA),
+        strip.text = element_text(size = 13, colour = "grey40"),
+        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+        panel.grid.minor = element_blank()) +
+  scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first", "second")) +
+  # scale_y_continuous(limits = c(43, 73)) +
+  # geom_hline(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043,
+  #            color = "grey", linetype = "dashed") +
+  # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
+  #            color = "grey", linetype = "dashed") +
+  xlab("capture event") +
+  ylab("scaled body mass index (g)") +
+  geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
+             color = "grey", linetype = "dashed") +
+  geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
+             color = "grey", linetype = "dashed")
+
+ggplot(data = repeated_measures_) + 
+  geom_line(aes(x = x_line, y = weight, group = ring), color = "grey40", alpha = 0.5) + 
+  geom_jitter(size = 6, aes(x = x_point, y = weight, fill = tag_type, shape = measure), 
+              shape = 21, color = "grey40", alpha = 0.75, width = 0.075) +
+  scale_shape_manual(values = c(21, 24)) +
+  scale_fill_manual(values = custom_colors) +
+  facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
+  theme(legend.position = "none",
+        text = element_text(family = "lato"),
+        axis.title = element_text(size = 11, colour = "grey40"),
+        axis.ticks = element_blank(),
+        # axis.ticks.length = unit(0.1, "cm"),
+        axis.text = element_text(size = 10, colour = "grey40"),
+        axis.title.y = element_text(size = 12),
+        axis.text.y = element_text(size = 10),
+        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(fill = 'transparent', color = NA), 
+        strip.background = element_rect(fill = 'transparent', color = NA),
+        strip.text = element_text(size = 13, colour = "grey40"),
+        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+        panel.grid.minor.y = element_line(size = 0.25, lineend = "round", colour = "grey90")) +
+  scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first", "second")) +
+  # scale_y_continuous(limits = c(43, 73)) +
+  geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
+             color = "grey", linetype = "dashed") +
+  geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
+             color = "grey", linetype = "dashed") +
+  # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
+  #            color = "grey", linetype = "dashed") +
+  xlab("capture event") +
+  ylab("raw body mass (g)")
+
+```
+
+### Percentage of mass model
+```{r}
+#### percentage of weight ----
+repeated_measures__ <- 
+  repeated_measures %>%
+  mutate(perc_burden = ifelse(tag_type == "control", sum(4 * colour_band, metal_band) / weight,
+                              ifelse(tag_type == "PTT", sum(PTT, harness, 4 * colour_band, metal_band) / weight, 
+                                     sum(GPS, harness, 4 * colour_band, metal_band) / weight)) * 100) %>% 
+  arrange(ring, date) %>% 
+  mutate(perc_burden = first(perc_burden),
+         delta_smi_wing = first(smi_wing) - last(smi_wing),
+         n_obs = n()) %>% 
+  ungroup() %>% 
+  filter(n_obs > 1) %>% 
+  dplyr::select(ring, tag_type, delta_smi_wing, perc_burden) %>% 
+  distinct()
+
+repeated_measures__ %>% 
+  group_by(tag_type) %>% 
+  dplyr::summarise(max_ = max(perc_burden),
+                   min_ = min(perc_burden),
+                   mean_ = mean(perc_burden))
+
+burden_smi_wing_lmer <- 
+  lm(delta_smi_wing ~ perc_burden, 
+       data = repeated_measures__)
+
+# Derive confidence intervals of effect sizes from parametric bootstrapping
+tidy_burden_smi_wing_lmer <-
+  tidy(burden_smi_wing_lmer, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+# run rptR to obtain repeatabilities of random effects
+rpt_burden_smi_wing_lmer <-
+  rpt(smi_wing ~ perc_burden * measure + (1 | ring),
+      grname = c("ring", "Fixed"),
+      data = repeated_measures__,
+      datatype = "Gaussian",
+      nboot = 1000, npermut = 1000, ratio = TRUE,
+      adjusted = TRUE, ncores = 4, parallel = TRUE)
+
+# run partR2 on each model to obtain marginal R2, parameter estimates, and beta
+# weights
+R2m_burden_smi_wing_lmer <-
+  partR2(burden_smi_wing_lmer,
+         partvars = c("perc_burden",
+                      "measure"),
+         R2_type = "marginal",
+         nboot = 1000,
+         CI = 0.95,
+         max_level = 1)
+
+R2c_burden_smi_wing_lmer <-
+  partR2(burden_smi_wing_lmer,
+         partvars = c("perc_burden",
+                      "measure"),
+         R2_type = "conditional",
+         nboot = 1000,
+         CI = 0.95,
+         max_level = 1)
+
+stats_burden_smi_wing_lmer <-
+  list(mod = burden_smi_wing_lmer,
+       tidy = tidy_burden_smi_wing_lmer,
+       rptR = rpt_burden_smi_wing_lmer,
+       partR2m = R2m_burden_smi_wing_lmer,
+       partR2c = R2c_burden_smi_wing_lmer,
+       data = repeated_measures__)
+
+summary(glht(burden_smi_wing_lmer))
+
+#### Table of effect sizes ----
+# Retrieve sample sizes
+sample_sizes <-
+  stats_burden_smi_wing_lmer$data %>%
+  ungroup() %>%
+  summarise(Individual = n_distinct(ring),
+            Observations = nrow(.))
+
+sample_sizes <-
+  as.data.frame(t(as.data.frame(sample_sizes))) %>%
+  rownames_to_column("term") %>%
+  rename(estimate = V1) %>%
+  mutate(stat = "n")
+
+# clean model component names
+mod_comp_names <-
+  data.frame(comp_name = c("Initial SMI (g; baseline intercept))",
+                           "Burden of attachments (% of body mass)",
+                           "\u0394 SMI (g)",
+                           "Additional \u0394 SMI (g) given attachment %",
+                           "Total Marginal \U1D479\U00B2",
+                           "Tag type",
+                           "Measurement sequence",
+                           "Total Conditional \U1D479\U00B2",
+                           "Individual",
+                           "Residual",
+                           "Individual",
+                           "Residual",
+                           "Individuals",
+                           "Observations"))
+
+# Fixed effect sizes (non-standardized)
+fixefTable <-
+  stats_burden_smi_wing_lmer$tidy %>%
+  dplyr::filter(effect == "fixed") %>%
+  dplyr::select(term, estimate, conf.low, conf.high) %>%
+  as.data.frame() %>%
+  mutate(stat = "fixed")
+
+# Fixed effect sizes (standardized)
+fixef_bw_Table <-
+  stats_burden_smi_wing_lmer$partR2m$BW %>%
+  as.data.frame() %>%
+  mutate(stat = "fixed_bw") %>%
+  rename(conf.low = CI_lower,
+         conf.high = CI_upper)
+
+# Semi-partial R2 estimates
+R2Table <-
+  bind_rows(stats_burden_smi_wing_lmer$partR2m$R2,
+            stats_burden_smi_wing_lmer$partR2c$R2[1,]) %>%
+  dplyr::select(term, estimate, CI_lower, CI_upper) %>%
+  as.data.frame() %>%
+  mutate(stat = "partR2") %>%
+  rename(conf.low = CI_lower,
+         conf.high = CI_upper)
+
+# Random effects variances
+ranefTable <-
+  stats_burden_smi_wing_lmer$tidy %>%
+  dplyr::filter(effect == "ran_pars") %>%
+  dplyr::select(group, estimate, conf.low, conf.high) %>%
+  as.data.frame() %>%
+  mutate(stat = "rand") %>%
+  rename(term = group) %>%
+  mutate(estimate = estimate^2,
+         conf.high = conf.high^2,
+         conf.low = conf.low^2)
+
+# Adjusted repeatabilities
+coefRptTable <-
+  stats_burden_smi_wing_lmer$rptR$R_boot %>%
+  dplyr::select(-Fixed) %>%
+  mutate(residual = 1 - rowSums(.)) %>%
+  apply(., 2,
+        function(x) c(mean (x), quantile (x, prob = c(0.025, 0.975)))) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("term") %>%
+  rename(estimate = V1,
+         conf.low = `2.5%`,
+         conf.high = `97.5%`) %>%
+  mutate(stat = "RptR")
+
+# Store all parameters into a single table and clean it up
+allCoefs_mod <-
+  bind_rows(fixefTable[1,], 
+            fixef_bw_Table,
+            R2Table,
+            ranefTable,
+            coefRptTable,
+            sample_sizes) %>%
+  bind_cols(.,
+            mod_comp_names) %>%
+  mutate(coefString = ifelse(!is.na(conf.low),
+                             paste0("[",
+                                    round(conf.low, 2), ", ",
+                                    round(conf.high, 2), "]"),
+                             NA),
+         effect = c(rep("Fixed effects \U1D6FD (standardized)", nrow(fixefTable[1,])),
+                    rep("Fixed effects \U1D6FD (standardized)", nrow(fixef_bw_Table)),
+                    rep("Partitioned \U1D479\U00B2", nrow(R2Table)),
+                    rep("Random effects \U1D70E\U00B2", nrow(ranefTable)),
+                    rep("Adjusted repeatability \U1D45F", nrow(coefRptTable)),
+                    rep("Sample sizes \U1D45B", nrow(sample_sizes)))) %>%
+  dplyr::select(effect, everything())
+
+# draw gt table
+smi_wing_lmer_seq_table <-
+  allCoefs_mod %>%
+  dplyr::select(effect, comp_name, estimate, coefString) %>%
+  gt(rowname_col = "row",
+     groupname_col = "effect") %>%
+  cols_label(comp_name = html("<i> </i>"),
+             estimate = "Mean estimate",
+             coefString = "95% confidence interval") %>%
+  fmt_number(columns = c(estimate),
+             rows = 1:12,
+             decimals = 2,
+             use_seps = FALSE) %>%
+  fmt_number(columns = c(estimate),
+             rows = 13:14,
+             decimals = 0,
+             use_seps = FALSE) %>%
+  sub_missing(columns = 1:4,
+              missing_text = "") %>%
+  cols_align(align = "left",
+             columns = c(comp_name)) %>%
+  tab_options(row_group.font.weight = "bold",
+              row_group.background.color = brewer.pal(9,"Greys")[3],
+              table.font.size = 12,
+              data_row.padding = 3,
+              row_group.padding = 4,
+              summary_row.padding = 2,
+              column_labels.font.size = 14,
+              row_group.font.size = 12,
+              table.width = pct(75))
+
+smi_wing_lmer_seq_table
+
+ggplot(repeated_measures__, 
+       aes(x = perc_burden, y = delta_smi_wing)) + 
+  geom_point() + 
+  labs(x = "percent body wieght of attachments (%)", y = "\u0394 scaled mass index (g)") + 
+  theme_minimal()
+```
+
+
+
+# Breeding status and outcome
+```{r}
+
+```
+
