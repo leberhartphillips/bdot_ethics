@@ -1,6 +1,5 @@
 ---
 title: "Banded Dotterel Tagging Trial"
-
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 author: 
  - name: Luke Eberhart-Hertel
@@ -74,7 +73,7 @@ packages_required_in_project <- c("dbo", "data.table", "apis", "stringr", "glue"
                                   "stringr", "remotes", "googlesheets4", 
                                   "corrplot", "smatr", "lme4", "broom.mixed", 
                                   "gtsummary", "RColorBrewer", "rptR", "partR2",
-                                  "multcomp", "effects", "gt", "scales", 
+                                  "multcomp", "effects", "gt", "scales", "readxl", 
                                   "colorspace", "showtext", "MuMIn", "here")
 
 # of the required packages, check if some need to be installed
@@ -243,7 +242,7 @@ all_caps_KK <-
                        ifelse(ring == "CP16614", "XX.RB|MX.WB", code))) %>% 
   filter(tag_type != "Druid")
 
-saveRDS(all_caps_KK, "ethics_trial/data/all_caps_KK.rds")
+# saveRDS(all_caps_KK, "ethics_trial/data/all_caps_KK.rds")
 ```
 
 ### PCA of structural traits
@@ -1237,7 +1236,99 @@ ggplot(repeated_measures__,
 
 
 # Breeding status and outcome
+### data import and wrangle
 ```{r}
+# import and consolidate key columns
+breeding_data_2021 <- 
+  read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
+                     sheet = "Kaikoura_NestVisit2021_1", 
+                     col_types = "text") %>%
+  mutate(visit_date_ = as.POSIXct(as.numeric(`Visit Date`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
+  mutate(visit_date_nz = with_tz(visit_date_, tzone = "Pacific/Auckland")) %>% 
+  mutate(date = as.Date(visit_date_nz)) %>% 
+  dplyr::select(OBJECTID, NestID, date, `Nest Status`, `Egg count`, `Number Hatched`, Notes, `Number Fledged`, `Number of chicks seen`) %>% 
+  rename(nest_fate = `Nest Status`,
+         eggs = `Egg count`,
+         hatched = `Number Hatched`,
+         fledged = `Number Fledged`,
+         chicks = `Number of chicks seen`)
 
+# Define a function to extract the desired patterns and ensure enough columns
+extract_patterns <- function(text) {
+  # Replace vertical bar '|' with an empty string
+  text <- gsub("\\|", "", text)
+  
+  # Extract all 4 or 5-character long texts that start with R or r
+  matches_r <- str_extract_all(text, "\\b[Rr]\\w{3,4}\\b")[[1]]
+  
+  # Extract UB, UN, UBF, UBM as standalone patterns
+  matches_ub_un <- str_extract_all(text, "\\b[Uu][BbNnFfMm]\\b")[[1]]
+  
+  # Combine matches
+  matches <- c(matches_r, matches_ub_un)
+  
+  # Ensure all matches are capitalized
+  matches <- toupper(matches)
+  
+  # Ensure there are exactly two columns, filling with NA if necessary
+  result <- c(matches, rep(NA, 2 - length(matches)))
+  
+  # Return the result as a named vector
+  return(setNames(result, c("parent1", "parent2")))
+}
+
+# Apply the function to the text column and store the results in new columns
+extracted_parents <- t(sapply(breeding_data_2021$NestID, extract_patterns))
+
+breeding_data_2021 <-
+  bind_cols(breeding_data_2021, extracted_parents) %>% 
+  dplyr::select(-parent2) %>% 
+  rename(parent = parent1) %>% 
+  bind_rows(bind_cols(breeding_data_2021, extracted_parents) %>% 
+              dplyr::select(-parent1) %>% 
+              rename(parent = parent2)) %>% 
+  filter(!is.na(parent)) %>% 
+  # filter(parent %in% (dat %>% filter(season == 2021) %>% pull(rings_comb) %>% unique())) %>%
+  filter(nest_fate == "Occupied" | as.numeric(chicks) > 0) %>%
+  group_by(parent) %>%
+  arrange(desc(date)) %>%
+  slice(1) %>%
+  ungroup() %>%
+  arrange(desc(date)) %>%
+  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>%
+  rename(last_date_breeding = date) %>% 
+  select(parent, last_date_breeding, nest_id, OBJECTID)
+
+# import and consolidate key columns
+breeding_data_2021_ <-
+  read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
+                     sheet = "Kaikoura_DotterelNest2021_0", 
+                     col_types = "text") %>%
+  mutate(hatch_date_ = as.POSIXct(as.numeric(`Date Hatched`) * 86400, origin = "1899-12-30", tz = "UTC"),
+         fail_date_ = as.POSIXct(as.numeric(`Date Failed`) * 86400, origin = "1899-12-30", tz = "UTC"),
+         found_date_ = as.POSIXct(as.numeric(`Date Found`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
+  mutate(hatch_date_nz = with_tz(hatch_date_, tzone = "Pacific/Auckland"),
+         fail_date_nz = with_tz(fail_date_, tzone = "Pacific/Auckland"),
+         found_date_nz = with_tz(found_date_, tzone = "Pacific/Auckland")) %>% 
+  mutate(hatch_date = as.Date(hatch_date_nz),
+         fail_date = as.Date(fail_date_nz),
+         found_date = as.Date(found_date_nz)) %>%
+  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", `Nest ID`)) %>% 
+  select(OBJECTID, nest_id, found_date, hatch_date, fail_date)
+
+left_join(breeding_data_2021, breeding_data_2021_, by = "nest_id") %>%
+  mutate(date_check = ifelse((!is.na(found_date) & is.na(fail_date) & is.na(hatch_date)) | 
+                               ((!is.na(hatch_date) & found_date < hatch_date)) | 
+                               ((!is.na(fail_date) & !is.na(hatch_date)) & hatch_date < fail_date) |
+                               ((!is.na(fail_date) & found_date < fail_date)), 1, 0)) %>% 
+  group_by(parent) %>% 
+  mutate(last_date_breeding_ = max(found_date, hatch_date, fail_date, na.rm = TRUE)) %>% 
+  mutate(days_diff = last_date_breeding_ - last_date_breeding) %>% 
+  arrange(desc(days_diff)) %>% 
+  mutate(last_date_breeding_final = as.Date(ifelse(days_diff > 0, last_date_breeding + ceiling(days_diff/2), last_date_breeding))) %>% 
+  arrange(desc(last_date_breeding_final)) %>% 
+  select(parent, last_date_breeding_final) %>% 
+  # specify the season as the first calender year
+  mutate(season = ifelse(month(last_date_breeding_final) < 7, year(last_date_breeding_final) - 1, year(last_date_breeding_final)))
 ```
 
