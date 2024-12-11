@@ -212,7 +212,7 @@ all_caps <-
 
 # tag deployment information
 tag_info <- 
-  read.csv("/Users/leberhart/ownCloud/kemp_projects/bdot/data/field/Kaikoura_tag_and_control_weights_Luke_2021_2022.csv") %>% 
+  read.csv("/Users/luketheduke2/ownCloud/kemp_projects/bdot/data/field/Kaikoura_tag_and_control_weights_Luke_2021_2022.csv") %>% 
   dplyr::select(ring, tag, tag_type, treatment_group) %>% 
   filter(tag != 0) %>% 
   distinct() %>% 
@@ -242,7 +242,7 @@ all_caps_KK <-
                        ifelse(ring == "CP16614", "XX.RB|MX.WB", code))) %>% 
   filter(tag_type != "Druid")
 
-# saveRDS(all_caps_KK, "ethics_trial/data/all_caps_KK.rds")
+# saveRDS(all_caps_KK, "data/all_caps_KK.rds")
 ```
 
 ### PCA of structural traits
@@ -715,7 +715,7 @@ repeated_measures <-
   dplyr::select(ring, second_date, second_weight, second_smi_wing, tag_type, treatment_group) %>% 
   full_join(first_obs, ., join_by(ring, tag_type, treatment_group)) %>%
   mutate(smi_wing_diff = second_smi_wing - first_smi_wing,
-         date_diff = second_date - first_date)%>%
+         date_diff = second_date - first_date) %>%
   pivot_longer(
     cols = c(first_date, first_smi_wing, first_weight,
              second_date, second_smi_wing, second_weight),
@@ -1238,6 +1238,42 @@ ggplot(repeated_measures__,
 # Breeding status and outcome
 ### data import and wrangle
 ```{r}
+# Function to extract the required characters
+extract_and_merge <- function(text) {
+  # Extract part before and after "|"
+  parts <- str_split(text, "\\|", simplify = TRUE)
+  part1 <- parts[1]
+  part2 <- parts[2]
+  
+  # Extract the two characters to the left of the "|"
+  left_chars <- str_sub(part1, -2, -1)
+  
+  # Extract the last two characters
+  right_chars <- str_sub(part2, -2, -1)
+  
+  # Merge these four characters together
+  paste0(left_chars, right_chars)
+}
+
+# Apply the function to the dataframe
+all_caps_KK <- 
+  readRDS("data/all_caps_KK.rds") %>% 
+  filter(year(date) > 2020) %>% 
+  filter(ring != "CP16458") %>% 
+  filter(ring != "CP16457") %>% 
+  filter(ring != "CP16606")
+
+
+all_caps_KK$parent <- 
+  sapply(all_caps_KK$code, extract_and_merge) 
+
+first_caps <- 
+  all_caps_KK %>% 
+  group_by(parent) %>%
+  slice_min(order_by = date, n = 1) %>% 
+  dplyr::select(parent, date, time, tag_type, treatment_group)
+  
+
 # import and consolidate key columns
 breeding_data_2021 <- 
   read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
@@ -1288,6 +1324,128 @@ breeding_data_2021 <-
               dplyr::select(-parent1) %>% 
               rename(parent = parent2)) %>% 
   filter(!is.na(parent)) %>% 
+  mutate(state = ifelse(!is.na(Notes) & str_detect(tolower(Notes), "aband"), "aband", 
+                        ifelse(((!is.na(hatched) & !is.na(chicks)) & (as.numeric(hatched) > 0 | as.numeric(chicks) > 0)) | 
+                                 nest_fate == "Finished", "brood",
+                               ifelse(nest_fate == "Failed", "fail", 
+                                      ifelse((!is.na(eggs) & as.numeric(eggs > 0)) | nest_fate == "Occupied", "incub", "XXX"))))) %>% 
+  right_join(., first_caps, by = "parent") %>% 
+  filter(!is.na(date.x)) %>% arrange(NestID, date.x) %>% 
+  filter(date.x >= date.y) %>% 
+  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>% 
+  dplyr::select(-c(date.y, time)) %>% 
+  rename(date = date.x) %>% 
+  mutate(state = factor(state, levels = c("fail", "aband", "brood", "incub")))
+
+breeding_data_2022 <-
+  read_excel(here("data/Kaikoura_Dotterel_Jan23_upd.xlsx"), 
+                     sheet = "Kaikoura_NestVisit_1", 
+                     col_types = "text") %>%
+  mutate(visit_date_ = as.POSIXct(as.numeric(`Visit Date`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
+  mutate(visit_date_nz = with_tz(visit_date_, tzone = "Pacific/Auckland")) %>% 
+  mutate(date = as.Date(visit_date_nz)) %>% 
+  dplyr::select(OBJECTID, NestID, date, `Nest Status`, `Egg count`, `Number Hatched`, Notes, `Number Fledged`, `Number of chicks seen`) %>% 
+  rename(nest_fate = `Nest Status`,
+         eggs = `Egg count`,
+         hatched = `Number Hatched`,
+         fledged = `Number Fledged`,
+         chicks = `Number of chicks seen`)
+
+# Apply the function to the text column and store the results in new columns
+extracted_parents <- t(sapply(breeding_data_2022$NestID, extract_patterns))
+
+breeding_data_2022 <-
+  bind_cols(breeding_data_2022, extracted_parents) %>% 
+  dplyr::select(-parent2) %>% 
+  rename(parent = parent1) %>% 
+  bind_rows(bind_cols(breeding_data_2022, extracted_parents) %>% 
+              dplyr::select(-parent1) %>% 
+              rename(parent = parent2)) %>% 
+  filter(!is.na(parent)) %>% 
+  mutate(state = ifelse(!is.na(Notes) & str_detect(tolower(Notes), "aband"), "aband", 
+                        ifelse(((!is.na(hatched) & !is.na(chicks)) & (as.numeric(hatched) > 0 | as.numeric(chicks) > 0)) | 
+                                 nest_fate == "Finished", "brood",
+                               ifelse(nest_fate == "Failed", "fail", 
+                                      ifelse((!is.na(eggs) & as.numeric(eggs > 0)) | nest_fate == "Occupied", "incub", "XXX"))))) %>% 
+  right_join(., first_caps, by = "parent") %>% 
+  filter(!is.na(date.x)) %>% arrange(NestID, date.x) %>% 
+  filter(date.x >= date.y) %>% 
+  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>% 
+  dplyr::select(-c(date.y, time)) %>% 
+  rename(date = date.x) %>% 
+  mutate(state = factor(state, levels = c("fail", "aband", "brood", "incub")))
+
+breeding_data_2023 <-
+  read_excel(here("data/Kaikoura_Dotterel_Feb2024_upd.xlsx"), 
+                     sheet = "Kaikoura_NestVisit_1", 
+                     col_types = "text") %>%
+  mutate(visit_date_ = as.POSIXct(as.numeric(`Visit Date`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
+  mutate(visit_date_nz = with_tz(visit_date_, tzone = "Pacific/Auckland")) %>% 
+  mutate(date = as.Date(visit_date_nz)) %>% 
+  dplyr::select(OBJECTID, NestID, date, `Nest Status`, `Egg count`, `Number Hatched`, Notes, `Number Fledged`, `Number of chicks seen`) %>% 
+  rename(nest_fate = `Nest Status`,
+         eggs = `Egg count`,
+         hatched = `Number Hatched`,
+         fledged = `Number Fledged`,
+         chicks = `Number of chicks seen`)
+
+# Apply the function to the text column and store the results in new columns
+extracted_parents <- t(sapply(breeding_data_2023$NestID, extract_patterns))
+
+breeding_data_2023 <-
+  bind_cols(breeding_data_2023, extracted_parents) %>% 
+  dplyr::select(-parent2) %>% 
+  rename(parent = parent1) %>% 
+  bind_rows(bind_cols(breeding_data_2023, extracted_parents) %>% 
+              dplyr::select(-parent1) %>% 
+              rename(parent = parent2)) %>% 
+  filter(!is.na(parent)) %>% 
+  mutate(state = ifelse(!is.na(Notes) & str_detect(tolower(Notes), "aband"), "aband", 
+                        ifelse(((!is.na(hatched) & !is.na(chicks)) & (as.numeric(hatched) > 0 | as.numeric(chicks) > 0)) | 
+                                 nest_fate == "Finished", "brood",
+                               ifelse(nest_fate == "Failed", "fail", 
+                                      ifelse((!is.na(eggs) & as.numeric(eggs > 0)) | nest_fate == "Occupied", "incub", "XXX"))))) %>% 
+  right_join(., first_caps, by = "parent") %>% 
+  filter(!is.na(date.x)) %>% arrange(NestID, date.x) %>% 
+  filter(date.x >= date.y) %>% 
+  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>% 
+  dplyr::select(-c(date.y, time)) %>% 
+  rename(date = date.x) %>% 
+  mutate(state = factor(state, levels = c("fail", "aband", "brood", "incub")))
+
+state_summary %>%
+  filter(state == "xxx")
+
+state_summary <- 
+  bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
+  mutate(nest_id = paste(year(date), nest_id, sep = "_")) %>% 
+  group_by(nest_id, parent, tag_type) %>% 
+  dplyr::summarise(state = min(as.numeric(state), na.rm = TRUE)) %>% 
+  group_by(tag_type, state) %>% 
+  summarise(n_nests = n_distinct(nest_id)) %>% 
+  mutate(state = ifelse(state == 1, "fail", 
+                        ifelse(state == 2, "aband", 
+                               ifelse(state == 3, "brood", 
+                                      ifelse(state == 4, "unkn", "xxx"))))) %>% 
+  ungroup()
+
+# Calculate the total number of nests for each treatment group
+state_summary$proportion <- with(state_summary, n_nests / tapply(n_nests, tag_type, sum)[tag_type])
+
+contingency_table <- xtabs(proportion ~ tag_type + state, data = state_summary)
+chi_square_test <- chisq.test(contingency_table)
+chi_square_test
+
+# Perform Fisher's exact test
+fisher_test <- fisher.test(contingency_table)
+
+# View the results
+fisher_test
+
+breeding_data_2021 %>% 
+  filter(state == "incub") %>% View()
+
+  #pull(state) %>% table()
   # filter(parent %in% (dat %>% filter(season == 2021) %>% pull(rings_comb) %>% unique())) %>%
   filter(nest_fate == "Occupied" | as.numeric(chicks) > 0) %>%
   group_by(parent) %>%
