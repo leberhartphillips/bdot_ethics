@@ -1548,6 +1548,20 @@ ggplot(as.data.frame(predictions_tag_type), aes(x = x, y = predicted, color = x)
 
 # Apparent survival
 ```{r}
+# install.packages("BaSTA")
+# library(BaSTA)
+# 
+# dat %>% 
+#   group_by(season, rings_comb) %>% 
+#   summarise(n_obs = n()) %>% 
+#   mutate(seen = 1) %>% 
+#   dplyr::select(-n_obs) %>% 
+#   CensusToCaptHist(ID = .$rings_comb, 
+#                    d = .$season,
+#                    timeInt = "Y") %>% 
+#   write.csv(., 
+#             "/Users/luketheduke2/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/data/mark_recapture_df.csv", row.names = FALSE)
+
 bdot_ch <- 
   read.csv("/Users/luketheduke2/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/data/mark_recapture_df.csv") %>% 
   rename(parent = ID) %>% 
