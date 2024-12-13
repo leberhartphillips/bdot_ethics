@@ -74,7 +74,8 @@ packages_required_in_project <- c("dbo", "data.table", "apis", "stringr", "glue"
                                   "corrplot", "smatr", "lme4", "broom.mixed", 
                                   "gtsummary", "RColorBrewer", "rptR", "partR2",
                                   "multcomp", "effects", "gt", "scales", "readxl", 
-                                  "colorspace", "showtext", "MuMIn", "here")
+                                  "colorspace", "showtext", "MuMIn", "here", "nnet",
+                                  "brms", "ggeffects")
 
 # of the required packages, check if some need to be installed
 new.packages <- 
@@ -195,6 +196,9 @@ caps_pre2024 <-
          nest_id = ID) %>% 
   dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, wing, tag_id)
 
+caps_pre2024 %>% 
+  
+
 colour_band = 0.08
 metal_band = 0.16
 
@@ -220,8 +224,8 @@ tag_info <-
   mutate(tag_id = as.character(tag_id))
 
 all_caps_KK <- 
-  all_caps %>% 
-  filter(site == "KK") %>% 
+  all_caps %>%
+  filter(site == "KK") %>%
   left_join(., tag_info, by = c("ring", "tag_id")) %>% 
   group_by(ring) %>% 
   mutate(tag_type = ifelse(is.na(tag_type), first(na.omit(tag_type)), tag_type),
@@ -243,6 +247,8 @@ all_caps_KK <-
   filter(tag_type != "Druid")
 
 # saveRDS(all_caps_KK, "data/all_caps_KK.rds")
+all_caps_KK <- 
+  readRDS("data/all_caps_KK.rds")
 ```
 
 ### PCA of structural traits
@@ -1234,7 +1240,6 @@ ggplot(repeated_measures__,
 ```
 
 
-
 # Breeding status and outcome
 ### data import and wrangle
 ```{r}
@@ -1254,40 +1259,6 @@ extract_and_merge <- function(text) {
   # Merge these four characters together
   paste0(left_chars, right_chars)
 }
-
-# Apply the function to the dataframe
-all_caps_KK <- 
-  readRDS("data/all_caps_KK.rds") %>% 
-  filter(year(date) > 2020) %>% 
-  filter(ring != "CP16458") %>% 
-  filter(ring != "CP16457") %>% 
-  filter(ring != "CP16606")
-
-
-all_caps_KK$parent <- 
-  sapply(all_caps_KK$code, extract_and_merge) 
-
-first_caps <- 
-  all_caps_KK %>% 
-  group_by(parent) %>%
-  slice_min(order_by = date, n = 1) %>% 
-  dplyr::select(parent, date, time, tag_type, treatment_group)
-  
-
-# import and consolidate key columns
-breeding_data_2021 <- 
-  read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
-                     sheet = "Kaikoura_NestVisit2021_1", 
-                     col_types = "text") %>%
-  mutate(visit_date_ = as.POSIXct(as.numeric(`Visit Date`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
-  mutate(visit_date_nz = with_tz(visit_date_, tzone = "Pacific/Auckland")) %>% 
-  mutate(date = as.Date(visit_date_nz)) %>% 
-  dplyr::select(OBJECTID, NestID, date, `Nest Status`, `Egg count`, `Number Hatched`, Notes, `Number Fledged`, `Number of chicks seen`) %>% 
-  rename(nest_fate = `Nest Status`,
-         eggs = `Egg count`,
-         hatched = `Number Hatched`,
-         fledged = `Number Fledged`,
-         chicks = `Number of chicks seen`)
 
 # Define a function to extract the desired patterns and ensure enough columns
 extract_patterns <- function(text) {
@@ -1313,7 +1284,39 @@ extract_patterns <- function(text) {
   return(setNames(result, c("parent1", "parent2")))
 }
 
-# Apply the function to the text column and store the results in new columns
+# Apply the function to the dataframe
+all_caps_KK <- 
+  readRDS("data/all_caps_KK.rds") %>% 
+  filter(year(date) > 2020) %>% 
+  filter(ring != "CP16458") %>% 
+  filter(ring != "CP16457") %>% 
+  filter(ring != "CP16606")
+
+all_caps_KK$parent <- 
+  sapply(all_caps_KK$code, extract_and_merge) 
+
+first_caps <- 
+  all_caps_KK %>% 
+  group_by(parent) %>%
+  slice_min(order_by = date, n = 1) %>% 
+  dplyr::select(parent, date, time, tag_type, treatment_group)
+  
+# import wrangle Ted and Ailsa's breeding records (i.e., the raw nest and brood visits)
+# 2021
+breeding_data_2021 <- 
+  read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
+                     sheet = "Kaikoura_NestVisit2021_1", 
+                     col_types = "text") %>%
+  mutate(visit_date_ = as.POSIXct(as.numeric(`Visit Date`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
+  mutate(visit_date_nz = with_tz(visit_date_, tzone = "Pacific/Auckland")) %>% 
+  mutate(date = as.Date(visit_date_nz)) %>% 
+  dplyr::select(OBJECTID, NestID, date, `Nest Status`, `Egg count`, `Number Hatched`, Notes, `Number Fledged`, `Number of chicks seen`) %>% 
+  rename(nest_fate = `Nest Status`,
+         eggs = `Egg count`,
+         hatched = `Number Hatched`,
+         fledged = `Number Fledged`,
+         chicks = `Number of chicks seen`)
+
 extracted_parents <- t(sapply(breeding_data_2021$NestID, extract_patterns))
 
 breeding_data_2021 <-
@@ -1329,14 +1332,16 @@ breeding_data_2021 <-
                                  nest_fate == "Finished", "brood",
                                ifelse(nest_fate == "Failed", "fail", 
                                       ifelse((!is.na(eggs) & as.numeric(eggs > 0)) | nest_fate == "Occupied", "incub", "XXX"))))) %>% 
+  mutate(state = ifelse(state == "brood" & as.numeric(fledged) > 0, "fledge", state)) %>% 
   right_join(., first_caps, by = "parent") %>% 
   filter(!is.na(date.x)) %>% arrange(NestID, date.x) %>% 
   filter(date.x >= date.y) %>% 
   mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>% 
   dplyr::select(-c(date.y, time)) %>% 
   rename(date = date.x) %>% 
-  mutate(state = factor(state, levels = c("fail", "aband", "brood", "incub")))
+  mutate(state = factor(state, levels = c("fledge", "fail", "aband", "brood", "incub")))
 
+## 2022
 breeding_data_2022 <-
   read_excel(here("data/Kaikoura_Dotterel_Jan23_upd.xlsx"), 
                      sheet = "Kaikoura_NestVisit_1", 
@@ -1351,7 +1356,6 @@ breeding_data_2022 <-
          fledged = `Number Fledged`,
          chicks = `Number of chicks seen`)
 
-# Apply the function to the text column and store the results in new columns
 extracted_parents <- t(sapply(breeding_data_2022$NestID, extract_patterns))
 
 breeding_data_2022 <-
@@ -1367,14 +1371,16 @@ breeding_data_2022 <-
                                  nest_fate == "Finished", "brood",
                                ifelse(nest_fate == "Failed", "fail", 
                                       ifelse((!is.na(eggs) & as.numeric(eggs > 0)) | nest_fate == "Occupied", "incub", "XXX"))))) %>% 
+  mutate(state = ifelse(state == "brood" & as.numeric(fledged) > 0, "fledge", state)) %>% 
   right_join(., first_caps, by = "parent") %>% 
   filter(!is.na(date.x)) %>% arrange(NestID, date.x) %>% 
   filter(date.x >= date.y) %>% 
   mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>% 
   dplyr::select(-c(date.y, time)) %>% 
   rename(date = date.x) %>% 
-  mutate(state = factor(state, levels = c("fail", "aband", "brood", "incub")))
+  mutate(state = factor(state, levels = c("fledge", "fail", "aband", "brood", "incub")))
 
+## 2023
 breeding_data_2023 <-
   read_excel(here("data/Kaikoura_Dotterel_Feb2024_upd.xlsx"), 
                      sheet = "Kaikoura_NestVisit_1", 
@@ -1389,7 +1395,6 @@ breeding_data_2023 <-
          fledged = `Number Fledged`,
          chicks = `Number of chicks seen`)
 
-# Apply the function to the text column and store the results in new columns
 extracted_parents <- t(sapply(breeding_data_2023$NestID, extract_patterns))
 
 breeding_data_2023 <-
@@ -1405,21 +1410,1199 @@ breeding_data_2023 <-
                                  nest_fate == "Finished", "brood",
                                ifelse(nest_fate == "Failed", "fail", 
                                       ifelse((!is.na(eggs) & as.numeric(eggs > 0)) | nest_fate == "Occupied", "incub", "XXX"))))) %>% 
+  mutate(state = ifelse(state == "brood" & as.numeric(fledged) > 0, "fledge", state)) %>% 
   right_join(., first_caps, by = "parent") %>% 
   filter(!is.na(date.x)) %>% arrange(NestID, date.x) %>% 
   filter(date.x >= date.y) %>% 
   mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>% 
   dplyr::select(-c(date.y, time)) %>% 
   rename(date = date.x) %>% 
-  mutate(state = factor(state, levels = c("fail", "aband", "brood", "incub")))
+  mutate(state = factor(state, levels = c("fledge", "fail", "aband", "brood", "incub")))
 
-state_summary %>%
-  filter(state == "xxx")
+tag_date_info <-
+  read_excel(here("data/tag_deploy_retrieve_dates.xlsx"), 
+                     col_types = "text") %>%
+  mutate(recapture_date = as.Date(as.POSIXct(as.numeric(recapture_date) * 86400, origin = "1899-12-30", tz = "UTC")),
+         last_argos_data = as.Date(as.POSIXct(as.numeric(last_argos_data) * 86400, origin = "1899-12-30", tz = "UTC")),
+         deployment_date = as.Date(as.POSIXct(as.numeric(deployment_date) * 86400, origin = "1899-12-30", tz = "UTC")))
 
-state_summary <- 
+# merge all breeding data and classify tag status based on deployment and removal times
+nest_fates <-
+  bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
+  mutate(season = ifelse(month(date) < 7, year(date) - 1, year(date))) %>% 
+  mutate(nest_id = paste(season, nest_id, sep = "_")) %>%
+  mutate(state = as.character(state)) %>% 
+  mutate(state = ifelse(is.na(state) & !is.na(eggs) & eggs > 0, "incub", state)) %>% 
+  mutate(state = ifelse(is.na(state) & grepl("chick", Notes), "brood", state)) %>% 
+  mutate(state = factor(state, levels = c("fledge", "fail", "aband", "brood", "incub"))) %>% 
+  filter(!is.na(state)) %>% 
+  group_by(nest_id, parent, tag_type, season) %>%
+  dplyr::summarise(state = min(as.numeric(state), na.rm = TRUE),
+                   date = min(date, na.rm = TRUE)) %>% 
+  mutate(state = ifelse(state == 1, "fledge", 
+                        ifelse(state == 2, "fail",
+                               ifelse(state == 3, "aband", 
+                                      ifelse(state == 4, "brood", 
+                                             ifelse(state == 5, "unkn", "xxx")))))) %>% 
+  ungroup() %>%
+  mutate(state = factor(state, levels = c("fledge", "fail", "aband", "brood", "unkn")),
+         tag_type = factor(tag_type),
+         parent = factor(parent),
+         season = factor(season)) %>% 
+  left_join(., tag_date_info %>% dplyr::select(-tag_type), by = "parent") %>% 
+  mutate(tag_type = as.character(tag_type)) %>%
+  mutate(tag_type = ifelse(!is.na(deployment_date) & !is.na(recapture_date) & date < deployment_date & date >= recapture_date, 
+                           "control", tag_type)) %>% 
+  mutate(tag_type = as.factor(tag_type)) %>% 
+  dplyr::select(-c("nickname", "deployment_date", "recapture_date", "comment", "last_argos_data")) %>% 
+  mutate(state = factor(state, levels = c("aband", "fail", "brood", "fledge", "unkn")),
+         tag_type = factor(tag_type, levels = c("control", "GPS", "PTT")))
+```
+
+### modelling
+```{r}
+# Fit the mixed-effects multinomial logistic regression model
+model_brm <- brm(state ~ tag_type + (1 | season) + (1 | parent), 
+                 data = nest_fates, 
+                 family = categorical(link = "logit"),
+  chains = 4, 
+  iter = 2000,
+  control = list(adapt_delta = 0.95))
+
+# Extract the posterior samples
+post_samples <- posterior_samples(model_brm)
+
+# Extract coefficients for tag_type
+tag_type_coeffs <- post_samples %>%
+  dplyr::select(matches("b_mu.+_tag_type"))
+
+# Summarize the coefficients
+tag_type_summary <- posterior_summary(tag_type_coeffs)
+print(tag_type_summary)
+
+# Calculate odds ratios
+odds_ratios <- exp(tag_type_summary[, c("Estimate", "Q2.5", "Q97.5")])
+print(odds_ratios)
+
+# Pairwise comparison between GPS and PTT for the 'fail' state
+hypothesis(model_brm, "mufail_tag_typeGPS - mufail_tag_typePTT > 0")
+
+# Predicted probabilities for 'tag_type'
+conditional_effects_plot <- 
+  conditional_effects(model_brm, effects = "tag_type", 
+                      categorical = TRUE)
+plot(conditional_effects_plot)
+
+# Coefficient plot for fixed effects
+mcmc_plot(model_brm, pars = "^b_")
+
+# Create effect plot for 'tag_type' using ggpredict
+predictions_tag_type <- ggpredict(model_brm, terms = "tag_type", type = "fixed")
+
+plot(predictions_tag_type) +
+  labs(title = "Effect of Tag Type on Predicted State Probabilities",
+       x = "Tag Type", y = "Predicted Probability") +
+  theme_minimal()
+
+# Calculate sample sizes
+sample_sizes <- nest_fates %>%
+  group_by(tag_type, state) %>%
+  summarise(n = n(), .groups = 'drop')
+
+# Create a data frame for the annotations
+annotation_df <- sample_sizes %>%
+  mutate(
+    x = tag_type,
+    response.level = state,
+    label = paste0("n = ", n)
+  ) %>% 
+  bind_rows(., data.frame(tag_type = c("GPS", "PTT"),
+                          state = c("aband", "unkn"),
+                          n = c(0, 0),
+                          x = c("GPS", "PTT"),
+                          response.level = c("aband", "unkn"),
+                          label = c("n = 0", "n = 0")))
+facet_labels <- c(
+  "aband" = "abandoned",
+  "brood" = "hatched",
+  "fail" = "failed",
+  "fledge" = "fledged",
+  "unkn" = "unknown"
+)
+
+# Facet the plot by 'state'
+ggplot(as.data.frame(predictions_tag_type), aes(x = x, y = predicted, color = x)) +
+  geom_point() +
+  # geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2)
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), alpha = 1, width = 0) +
+  geom_text(data = annotation_df, aes(x = x, y = -0.1, label = label),
+            color = "black", size = 3, position = position_nudge(y = -0.05)) +
+  labs(title = "Effect of Tag Type on Predicted State Probabilities",
+       x = "Tag Type", y = "Predicted Probability") +
+  theme_minimal() +
+  facet_wrap(~ response.level, scales = "fixed", labeller = labeller(response.level = facet_labels), nrow = 1) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "none")
+```
+
+# Apparent survival
+```{r}
+bdot_ch <- 
+  read.csv("/Users/luketheduke2/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/data/mark_recapture_df.csv") %>% 
+  rename(parent = ID) %>% 
+  left_join(., tag_date_info %>% dplyr::select(parent, tag_type, deployment_date, recapture_date), by = "parent") %>% 
+  mutate(tag_type = str_sub(tag_type, 1, 1)) %>% 
+  mutate(deployment_date = ifelse(!is.na(deployment_date), year(deployment_date), NA),
+         recapture_date = ifelse(!is.na(recapture_date), year(recapture_date), NA)) %>% 
+  mutate(X2021 = ifelse(X2021 == 1, "C", "0"),
+         X2022 = ifelse(X2022 == 1, "C", '0'),
+         X2023 = ifelse(X2023 == 1, "C", "0")) %>% 
+  mutate(X2021 = ifelse(X2021 == "0", "0",
+                        ifelse(is.na(deployment_date), "C",
+                               ifelse(deployment_date == 2021, tag_type, "C"))),
+         X2022 = ifelse(X2022 == "0", "0",
+                        ifelse(is.na(deployment_date), "C",
+                               ifelse(deployment_date == 2022, tag_type, 
+                                      ifelse(!is.na(recapture_date), tag_type, "C")))),
+         X2023 = ifelse(X2023 == "0", "0",
+                        ifelse(is.na(deployment_date), "C",
+                               ifelse(deployment_date == 2022, tag_type, 
+                                      ifelse(recapture_date == 2023, tag_type,
+                                             ifelse(is.na(recapture_date), tag_type, "C")))))) %>% 
+  mutate(X2022 = ifelse(parent == "RBRL", "P", X2022),
+         X2023 = ifelse(parent == "RBRL", "P", X2023)) %>% 
+  mutate(X2022 = ifelse(parent == "RBWO", "P", X2022)) %>% 
+  mutate(X2022 = ifelse(parent == "RRBR", "G", X2022)) %>% 
+  mutate(X2022 = ifelse(parent == "RRRG", "P", X2022)) %>% 
+  arrange(tag_type) %>% 
+  dplyr::select(-c(tag_type, deployment_date, recapture_date))
+
+bdot_ch <- 
+  data.frame(ch = apply(bdot_ch[, 2:4], 1, paste, collapse = ""),
+             freq = 1)
+
+library(RMark)
+# Specify the states and create the dataframe for RMark
+bdot_processed <- process.data(bdot_ch, model = "Multistrata", groups = NULL)
+bdot_ddl <- make.design.data(bdot_processed)
+
+table(bdot_ddl$Psi[,c("stratum","tostratum")])
+
+# Define parameter formulas
+S.model <- list(formula = ~ stratum)  # Survival depends on the state
+p.model <- list(formula = ~ stratum)  # Detection probability depends on the state
+Psi.model.stratum <- list(formula = ~ -1+stratum)  
+Psi.model.stratumto <- list(formula = ~ -1+stratum:tostratum) 
+Psi.model.stratumtotime <- list(formula = ~ -1+stratum:tostratum:time)  # Transition probabilities depend on the state and destination state
+
+
+
+model.list <- create.model.list("Multistrata") 
+bdot.results <- mark.wrapper(model.list, data = bdot_processed, ddl = bdot_ddl)
+bdot.results$S.model.p.model.Psi.model.stratumtotime$results$real
+
+# extract and format the transformed parameter estimates
+bdot_estimates <-
+  bdot.results$S.model.p.model.Psi.model.stratumtotime$results$real %>% 
+  bind_cols(data.frame(str_split_fixed(rownames(.), " ", 
+                                       n = 5)), .) %>% 
+  dplyr::mutate(tag_type = as.factor(ifelse(unlist(str_extract_all(X2,"[CGP]")) == "C", "control",
+                                            ifelse(unlist(str_extract_all(X2,"[CGP]")) == "G", "GPS", "PTT"))),
+                parameter = as.factor(ifelse(X1 == "S", "Phi",
+                                            ifelse(X1 == "p", "p", "Psi"))),
+                transition = ifelse(X1 == "Psi", paste0(str_sub(X2, 2, 2), X3), NA),
+                year = ifelse(X1 == "Psi", ifelse(str_sub(X5, 10, 11) == "t1", 2021, 2022), NA)) %>% 
+  dplyr::select(parameter, tag_type, transition, year, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
+  
+#### Plotting ####
+# first setup the plotting theme
+dipper_theme <- 
+  theme(text = element_text(family = "Franklin Gothic Book"),
+        legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10,margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.y  = element_text(size = 9),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.ticks.y = element_line(size = 0.2, colour = "grey40"),
+        axis.ticks.length = unit(0.1, "cm"),
+        axis.ticks.x = element_line(size = 0.2, colour = "grey40"),
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm"),
+        panel.spacing = unit(0.3, "lines"),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12),
+        panel.border = element_rect(linetype = "solid", colour = "grey"),
+        panel.background = element_rect(linetype = "solid", fill = "white"))
+
+
+# get sample sizes of individuals used to estimate age-specific rates
+bdot_ch %>% 
+  mutate(tag_type = ifelse(str_detect(ch, "P"), "PTT",
+                           ifelse(str_detect(ch, "G"), "GPS",
+                                  ifelse(str_detect(ch, "C"), "control", NA)))) %>% 
+  # dplyr::select(ring, age) %>%
+  # distinct() %>% 
+  group_by(tag_type) %>% 
+  summarise(N = n())
+
+# age-specific apparent survival plot
+dipper_df_ch_sex %>% 
+  group_by(sex) %>% 
+  summarise(N = n())
+
+tag_type_surv_plot <- 
+  ggplot(data = filter(bdot_estimates, parameter == "Phi"),
+         aes(x = tag_type, y = estimate, color = tag_type)) +
+  geom_errorbar(aes(ymin = lcl, ymax = ucl), 
+               size = 0.3, linetype = "solid", width = 0.1) +
+  geom_point(size = 3) +
+  theme_bw() + 
+  dipper_theme +
+  ylab("Apparent survival (± 95% CI)") +
+  scale_y_continuous(limits = c(0, 1)) +
+  scale_color_brewer(palette = "Set1") +
+  annotate(geom = "text", y = 0.6, x = 1, angle = 0,
+           label = "N = 74", 
+           color = "grey30", size = 2.5, fontface = 'italic') +
+  annotate(geom = "text", y = 0.45, x = 2, angle = 0,
+           label = "N = 10", 
+           color = "grey30", size = 2.5, fontface = 'italic') +
+  annotate(geom = "text", y = 0.45, x = 3, angle = 0,
+           label = "N = 10", 
+           color = "grey30", size = 2.5, fontface = 'italic')
+
+tag_type_p_plot <- 
+  ggplot(data = filter(bdot_estimates, parameter == "p"),
+         aes(x = tag_type, y = estimate, color = tag_type)) +
+  geom_errorbar(aes(ymin = lcl, ymax = ucl), 
+               size = 0.3, linetype = "solid", width = 0.1) +
+  geom_point(size = 3) +
+  theme_bw() + 
+  dipper_theme +
+  ylab("Apparent survival (± 95% CI)") +
+  scale_y_continuous(limits = c(0, 1)) +
+  scale_color_brewer(palette = "Set1") +
+  annotate(geom = "text", y = 0.6, x = 1, angle = 0,
+           label = "N = 74", 
+           color = "grey30", size = 2.5, fontface = 'italic') +
+  annotate(geom = "text", y = 0.45, x = 2, angle = 0,
+           label = "N = 10", 
+           color = "grey30", size = 2.5, fontface = 'italic') +
+  annotate(geom = "text", y = 0.45, x = 3, angle = 0,
+           label = "N = 10", 
+           color = "grey30", size = 2.5, fontface = 'italic')
+```
+
+
+```{r}
+# dipper_df_ch_age_site %>% 
+#   mutate(recuit = ifelse(str_detect(ch, "11") & age == "J", "yes", "no")) %>% 
+#   group_by(site, age, recuit) %>% 
+#   summarise(N = n())
+# 
+# Age_Site_Phi_plot <- 
+#   ggplot(data = filter(estimates_age_site, parameter == "Phi"),
+#          aes(x = site, y = estimate, color = age)) +
+#   geom_errorbar(aes(ymin = lcl, ymax = ucl), position = position_dodge(1), 
+#                 size = 0.3, linetype = "solid", width = 0.1) +
+#   geom_point(size = 3, position = position_dodge(1)) +
+#   theme_bw() + 
+#   dipper_theme +
+#   theme(legend.position = "top",
+#         axis.title.y = element_blank(),
+#         axis.text.y  = element_blank()) +
+#   ylab("Apparent survival (± 95% CI)") +
+#   scale_y_continuous(limits = c(0, 1)) +
+#   scale_color_brewer(palette = "Dark2") +
+#   annotate(geom = "text", y = 0.73, x = 0.75, angle = 0,
+#            label = "N = 12", 
+#            color = "grey30", size = 2.5, fontface = 'italic') +
+#   annotate(geom = "text", y = 0.25, x = 1.25, angle = 0,
+#            label = "N = 66", 
+#            color = "grey30", size = 2.5, fontface = 'italic')  +
+#   annotate(geom = "text", y = 0.8, x = 1.75, angle = 0,
+#            label = "N = 33", 
+#            color = "grey30", size = 2.5, fontface = 'italic') +
+#   annotate(geom = "text", y = 0.33, x = 2.25, angle = 0,
+#            label = "N = 93", 
+#            color = "grey30", size = 2.5, fontface = 'italic')
+# 
+# Age_Site_p_plot <- 
+#   ggplot(data = filter(estimates_age_site, parameter == "p"),
+#          aes(x = site, y = estimate, color = age)) +
+#   geom_errorbar(aes(ymin = lcl, ymax = ucl), position = position_dodge(1), 
+#                 size = 0.3, linetype = "solid", width = 0.1) +
+#   geom_point(size = 3, position = position_dodge(1)) +
+#   theme_bw() + 
+#   dipper_theme +
+#   theme(legend.position = "top",
+#         axis.title.y = element_blank(),
+#         axis.text.y  = element_blank()) +
+#   ylab("Apparent survival (± 95% CI)") +
+#   scale_y_continuous(limits = c(0, 1)) +
+#   scale_color_brewer(palette = "Dark2") +
+#   annotate(geom = "text", y = 0.73, x = 0.75, angle = 0,
+#            label = "N = 12", 
+#            color = "grey30", size = 2.5, fontface = 'italic') +
+#   annotate(geom = "text", y = 0.25, x = 1.25, angle = 0,
+#            label = "N = 66", 
+#            color = "grey30", size = 2.5, fontface = 'italic')  +
+#   annotate(geom = "text", y = 0.8, x = 1.75, angle = 0,
+#            label = "N = 33", 
+#            color = "grey30", size = 2.5, fontface = 'italic') +
+#   annotate(geom = "text", y = 0.33, x = 2.25, angle = 0,
+#            label = "N = 93", 
+#            color = "grey30", size = 2.5, fontface = 'italic')
+# 
+# # arrange multi-paneled plot
+# Wurm_plot <-
+#   Sex_Phi_plot + Age_Site_Phi_plot + 
+#   plot_annotation(
+#     title = 'CJS model of European Dippers (2017-2022)') + 
+#   plot_layout(widths = c(1, 1.5))
+# 
+# # export plot to working directory
+# ggsave(Wurm_plot,
+#        filename = "figs/age_site_sex_dipper_survival_2017-2022.jpeg",
+#        width = 5,
+#        height = 4, 
+#        units = "in")
+# 
+# #### Tabulation of results ####
+# dipper_CJS_effect_size_table <- 
+#   estimates_combined %>% 
+#   mutate(structure = ifelse(parameter != "Phi" & str_detect(analysis, "sex"), "-", 
+#                             ifelse(parameter == "p" & str_detect(analysis, "site"), as.character(age),
+#                                    ifelse(is.na(sex) & parameter == "Phi", 
+#                                           paste0(site, ", ", age), 
+#                                           as.character(sex))))) %>% 
+#   dplyr::select(parameter, structure, estimate, analysis, coefString) %>%
+#   gt(groupname_col = "analysis") %>% 
+#   cols_label(parameter = html("<i>Model</i>"),
+#              estimate = "Mean estimate",
+#              coefString = "95% confidence interval",
+#              structure = html("<i>structure</i>")) %>% 
+#   fmt_number(columns = vars(estimate),
+#              rows = 1:9,
+#              decimals = 2,
+#              use_seps = FALSE) %>% 
+#   cols_align(align = "right",
+#              columns = vars(parameter)) %>% 
+#   cols_align(align = "left",
+#              columns = vars(structure)) %>% 
+#   tab_options(row_group.font.weight = "bold",
+#               row_group.background.color = brewer.pal(9,"Greys")[3],
+#               table.font.size = 12,
+#               data_row.padding = 3,
+#               row_group.padding = 4,
+#               summary_row.padding = 2,
+#               column_labels.font.size = 14,
+#               row_group.font.size = 12,
+#               table.width = pct(50)) %>% 
+#   tab_header(
+#     title = "CJS model of European Dippers (2017 to 2022)",
+#     subtitle = "Effect sizes"
+#   )
+# 
+# dipper_CJS_effect_size_table %>%
+#   gtsave("dipper_CJS_effect_size_table.png", path = "tables/")
+# 
+# dipper_CJS_betas_table <- 
+#   betas_combined %>% 
+#   dplyr::select(parameter, component, estimate, analysis, coefString) %>%
+#   gt(groupname_col = "analysis") %>% 
+#   cols_label(parameter = html("<i>Model</i>"),
+#              estimate = "Mean estimate",
+#              coefString = "95% confidence interval",
+#              component = html("<i>structure</i>")) %>% 
+#   fmt_number(columns = vars(estimate),
+#              rows = 1:8,
+#              decimals = 2,
+#              use_seps = FALSE) %>% 
+#   cols_align(align = "right",
+#              columns = vars(parameter)) %>% 
+#   cols_align(align = "left",
+#              columns = vars(component)) %>% 
+#   tab_options(row_group.font.weight = "bold",
+#               row_group.background.color = brewer.pal(9,"Greys")[3],
+#               table.font.size = 12,
+#               data_row.padding = 3,
+#               row_group.padding = 4,
+#               summary_row.padding = 2,
+#               column_labels.font.size = 14,
+#               row_group.font.size = 12,
+#               table.width = pct(50)) %>% 
+#   tab_header(
+#     title = "CJS model of European Dippers (2017 to 2022)",
+#     subtitle = "Fixed effect coefficients"
+#   )
+# 
+# 
+# # Create the model
+# ms_model <- mark(df_processed, model = "Multistrata", 
+#                  model.parameters = list(S = S.model, p = p.model, Psi = Psi.model))
+# 
+# # Run the model
+# ms_results <- summary(ms_model)
+# 
+# ms_results$beta
+# 
+# ms_results$beta[2, "estimate"] <- ms_results$beta[2, "estimate"] + ms_results$beta[1, "estimate"]
+# ms_results$beta[3, "estimate"] <- ms_results$beta[3, "estimate"] + ms_results$beta[1, "estimate"]
+# ms_results$beta[5, "estimate"] <- ms_results$beta[5, "estimate"] + ms_results$beta[4, "estimate"]
+# ms_results$beta[6, "estimate"] <- ms_results$beta[6, "estimate"] + ms_results$beta[4, "estimate"]
+# ms_results$beta[8, "estimate"] <- ms_results$beta[8, "estimate"] + ms_results$beta[7, "estimate"]
+# ms_results$beta[9, "estimate"] <- ms_results$beta[9, "estimate"] + ms_results$beta[7, "estimate"]
+# 
+# ms_results$beta[2, "lcl"] <- ms_results$beta[2, "lcl"] + ms_results$beta[1, "lcl"]
+# ms_results$beta[3, "lcl"] <- ms_results$beta[3, "lcl"] + ms_results$beta[1, "lcl"]
+# ms_results$beta[5, "lcl"] <- ms_results$beta[5, "lcl"] + ms_results$beta[4, "lcl"]
+# ms_results$beta[6, "lcl"] <- ms_results$beta[6, "lcl"] + ms_results$beta[4, "lcl"]
+# ms_results$beta[8, "lcl"] <- ms_results$beta[8, "lcl"] + ms_results$beta[7, "lcl"]
+# ms_results$beta[9, "lcl"] <- ms_results$beta[9, "lcl"] + ms_results$beta[7, "lcl"]
+# 
+# ms_results$beta[2, "ucl"] <- ms_results$beta[2, "ucl"] + ms_results$beta[1, "ucl"]
+# ms_results$beta[3, "ucl"] <- ms_results$beta[3, "ucl"] + ms_results$beta[1, "ucl"]
+# ms_results$beta[5, "ucl"] <- ms_results$beta[5, "ucl"] + ms_results$beta[4, "ucl"]
+# ms_results$beta[6, "ucl"] <- ms_results$beta[6, "ucl"] + ms_results$beta[4, "ucl"]
+# ms_results$beta[8, "ucl"] <- ms_results$beta[8, "ucl"] + ms_results$beta[7, "ucl"]
+# ms_results$beta[9, "ucl"] <- ms_results$beta[9, "ucl"] + ms_results$beta[7, "ucl"]
+# 
+# ms_results$beta %>% 
+#   mutate(estimate = logistic(estimate),
+#          lcl = logistic(lcl),
+#          ucl = logistic(ucl))
+# 
+# ms_results$reals$S$` Stratum:C`$pim
+# ms_results$reals$S$` Stratum:G`$pim
+# ms_results$reals$S$` Stratum:P`$pim
+# 
+# # Create a data frame with the covariate values for prediction
+# new_data <- data.frame(stratum = factor(c("G", "P", "C")))
+# 
+# # Get predicted survival probabilities
+# S_predictions <- covariate.predictions(ms_model, data = new_data, indices = NULL, parameter = "S")
+# 
+# # Get predicted detection probabilities
+# p_predictions <- covariate.predictions(ms_model, data = new_data, indices = NULL, parameter = "p")
+# 
+# # Get predicted transition probabilities
+# Psi_predictions <- covariate.predictions(ms_model, data = new_data, indices = NULL, parameter = "Psi")
+# 
+# # Display the results
+# print(S_predictions)
+# print(p_predictions)
+# print(Psi_predictions)
+# 
+#   # Define the logistic function
+# logistic <- function(x) {
+#   1 / (1 + exp(-x))
+# }
+# 
+# # Convert beta estimates to probabilities
+# predicted_probabilities <- logistic(beta_estimates$estimate)
+# # Display the results
+# print(ms_results)
+
+```
+
+
+
+# Movements of tagged birds
+```{r}
+# scidb
+con <- dbo::dbcon(server = "scidb_replica")
+
+KK_PTT_data <- 
+  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
+  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
+  filter(longitude > 100 & latitude < 0) %>% 
+  mutate(temp = (0.474 * S1) - 35.662,
+         volt = (0.0079 * S2) + 2.4129) %>% 
+  dplyr::select(tagID, locationDate, locationClass, latitude, longitude, temp, volt) %>% 
+  distinct() %>% 
+  mutate(source = "tag")
+
+# BADO google sheets
+BADO_caps_raw <- 
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit#gid=1382609695", 
+            sheet = "Captures", col_types = "c") 
+
+BADO_resights_raw <- 
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit#gid=1382609695", 
+             sheet = "Resights", col_types = "c")
+
+#### custom functions ----
+sfc_as_cols <- function(x, geometry, names = c("x","y")) {
+  if (missing(geometry)) {
+    geometry <- sf::st_geometry(x)
+  } else {
+    geometry <- rlang::eval_tidy(enquo(geometry), x)
+  }
+  stopifnot(inherits(x,"sf") && inherits(geometry,"sfc_POINT"))
+  ret <- sf::st_coordinates(geometry)
+  ret <- tibble::as_tibble(ret)
+  stopifnot(length(names) == ncol(ret))
+  x <- x[ , !names(x) %in% names]
+  ret <- setNames(ret,names)
+  dplyr::bind_cols(x,ret)
+}
+
+# function that does the opposite of "%in%"
+`%!in%` = Negate(`%in%`)
+
+#### wrangle Argos and banding data
+
+# classify PTT color combos
+PTTs <- 
+  c("XX.RB|MX.RL", "XX.RR|MX.RG", "XX.RR|MX.GO", "XX.RR|MX.OW", "XX.RB|MX.WO",
+    "XX.RB|MX.WR", "XX.RB|MX.OG", "XX.RB|MX.GB", "XX.RW|MX.LG", "XX.RB|MX.OY",
+    "MX.YY|XX.BO", "MX.YY|XX.BY", "MX.YY|XX.BW", "MX.YY|XX.BR", "MX.YW|XX.GW", 
+    "MX.YW|XX.BY", "MX.YW|XX.RG")
+
+# wrangle coordinate system of cap and resight data
+BADO_resights <-
+  BADO_resights_raw %>% 
+  filter(utm != "WGS87") %>% 
+  filter(!is.na(easting)) %>% 
+  st_as_sf(., coords = c("easting", "northing"), crs = 2193) %>% 
+  st_transform(., crs = 4326) %>% 
+  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+  st_drop_geometry() %>%
+  bind_rows(BADO_resights_raw %>% filter(utm == "WGS87") %>% 
+              rename(latitude = northing, longitude = easting) %>% 
+              mutate(longitude = as.numeric(longitude),
+                     latitude = as.numeric(latitude))) %>% 
+  filter(sex != "J") %>% 
+  filter(site %!in% c("KT", "KK")) %>%
+  mutate(date = paste(year, 
+                       ifelse(nchar(date) == 3, 
+                              str_sub(date, start = 2, end = 3), 
+                              str_sub(date, start = 3, end = 4)), 
+                       ifelse(nchar(date) == 3, 
+                              str_sub(date, start = 1, end = 1), 
+                              str_sub(date, start = 1, end = 2)), 
+                       sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
+  left_join(., BADO_caps_raw %>% filter(sex != "J") %>% filter(!is.na(easting)) %>% dplyr::select(code, tag),
+            by = "code") %>%
+  mutate(source = "resight") %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
+  mutate(status = ifelse(code %in% PTTs, "tag", "no-tag")) %>%
+  mutate(tag = ifelse(tag == "66891" & year == "2021", "66891_1",
+                      ifelse(tag == "66891" & year == "2022", "66891_2", tag))) %>% 
+  rename(tagID = tag) %>% 
+  dplyr::select(source, code, sex, date, tagID, status)
+
+BADO_caps <-
+  BADO_caps_raw %>% 
+  filter(utm != "WGS87") %>% 
+  mutate(easting = as.numeric(easting),
+         northing = as.numeric(northing)) %>% 
+  filter(!is.na(easting)) %>% 
+  st_as_sf(., coords = c("easting", "northing"), crs = 2193) %>% 
+  st_transform(., crs = 4326) %>% 
+  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+  st_drop_geometry() %>% 
+  bind_rows(., BADO_caps_raw %>% filter(utm == "WGS87") %>% 
+              rename(longitude = easting, latitude = northing) %>% 
+              mutate(longitude = as.numeric(longitude), latitude = as.numeric(latitude))) %>% 
+  group_by(ring) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
+                      ifelse(tag == "66891" & year == "2022", "66891_2", 
+                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
+         date = ifelse(code == "XX.RW|MX.LG", "2610",
+                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
+         year = ifelse(code == "XX.RW|MX.LG", "2022",
+                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
+  mutate(date = paste(year, 
+                      ifelse(nchar(date) == 3, 
+                             str_sub(date, start = 2, end = 3), 
+                             str_sub(date, start = 3, end = 4)), 
+                      ifelse(nchar(date) == 3, 
+                             str_sub(date, start = 1, end = 1), 
+                             str_sub(date, start = 1, end = 2)), 
+                      sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
+  rename(tagID = tag) %>% 
+  mutate(source = "capture") %>% 
+  dplyr::select(source, code, tagID, sex, date, longitude, latitude) %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
+  mutate(status = ifelse(code %in% PTTs, "tag", "no-tag")) %>% 
+  filter(code %in% BADO_resights$code | code %in% PTTs)
+
+#### wrangle BADO Argos data ----
+BADO_PTTs <- 
+  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
+  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
+  filter(longitude > 100 & latitude < 0) %>% 
+  mutate(temp = (0.474 * S1) - 35.662,
+         volt = (0.0079 * S2) + 2.4129) %>% 
+  dplyr::select(tagID, locationDate, locationClass, latitude, longitude, temp, volt) %>% 
+  distinct() %>% 
+  mutate(source = "tag") %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>%
+  # sfc_as_cols(., names = c("lon", "lat")) %>% 
+  filter(locationClass %in% c(1, 2, 3)) %>% 
+  filter(year(locationDate) > 2020) %>%
+  mutate(tagID = ifelse(tagID == "66891" & locationDate < as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_1",
+                      ifelse(tagID == "66891" & locationDate >= as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_2", tagID))) %>%  
+  left_join(., BADO_caps %>% st_drop_geometry() %>% dplyr::select(code, tagID, date, sex), by = "tagID") %>% #filter(tagID == "234673")
+  rename(cap_date = date,) %>% 
+  filter(locationDate >= cap_date) %>% 
+  mutate(date = as.Date(locationDate),
+         status = "tag") #%>% 
+  # dplyr::select(-cap_date, -locationClass, -locationDate, -temp, -volt)
+
+BADO_PTTs %>% 
+  pull(tagID) %>% 
+  unique()
+
+sf_points = BADO_PTTs %>% filter(tagID == "234658")
+
+# Function to create lines connecting points
+create_lines <- function(sf_points) {
+  line_list <- list()
+  
+  for (i in 1:(nrow(sf_points) - 1)) {
+    line <- st_sfc(st_linestring(rbind(st_coordinates(sf_points[i, ]), st_coordinates(sf_points[i + 1, ]))))
+    line_list[[i]] <- st_sf(geometry = line, time = sf_points$locationDate[i + 1])
+  }
+  
+  do.call(rbind, line_list)
+}
+
+sf_lines <- create_lines(BADO_PTTs)
+
+# Extract coordinates for leaflet.minicharts
+coords <- sf_points %>% st_coordinates()
+
+# Create leaflet map
+leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addFlows(
+    lng0 = coords[1:(nrow(coords)-1), "X"], lat0 = coords[1:(nrow(coords)-1), "Y"],
+    lng1 = coords[2:nrow(coords), "X"], lat1 = coords[2:nrow(coords), "Y"],
+    color = "blue",
+    opacity = 0.5,  # Set transparency
+    flow = TRUE,
+    maxThickness = 5  # Set size (thickness) of the flow lines
+  ) %>%
+  addCircleMarkers(data = sf_points, color = "red", radius = 5, popup = ~as.character(locationDate))
+
+# Ensure that the coordinate vectors are correctly handled
+lng0 <- coords[1:(nrow(coords)-1), "X"]
+lat0 <- coords[1:(nrow(coords)-1), "Y"]
+lng1 <- coords[2:nrow(coords), "X"]
+lat1 <- coords[2:nrow(coords), "Y"]
+
+# Confirming the lengths match
+length(lng0) == length(lat0) && length(lng1) == length(lat1) && length(lng0) == length(lng1)
+
+
+# Create a leaflet map
+map <- leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addCircleMarkers(data = sf_points, color = "red", radius = 5, popup = ~as.character(locationDate)) %>%
+  addPolylines(data = sf_lines, color = "blue", weight = 2)
+
+# Animate the lines
+# Note: leaflet.extras doesn't directly support animation, 
+# but you can use the `addTimeline` function for a simple temporal visualization.
+map %>% addTimeline(data = sf_lines, timelineOptions = timelineOptions(
+  styleOptions = list(
+    color = "blue",
+    weight = 2
+  ),
+  steps = 500,
+  duration = 10000,
+  easing = "linear"
+))
+
+mapview(BADO_PTTs%>% filter(tagID == "66891_1"), zcol = "tagID")
+
+KK_PTT_last_dates <- 
+  BADO_PTTs %>% 
+  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+  st_drop_geometry() %>% 
+  group_by(tagID, code) %>%
+  summarise(last_Argos_data = max(date))
+
+KK_PTT_last_dates$parent <- 
+  sapply(KK_PTT_last_dates$code, extract_and_merge)
+
+KK_PTT_last_dates %>% 
+  filter(str_sub(parent, 1, 1) == "R")
+```
+
+
+```{r}
+# RBBR (MR Omaha) tag 55687 removed on 28.09.2022
+# RLYL no tag 21251 on at 29.09.2022
+# RRLR tag 20865 removed on 29.09.2022
+# RBBY tag 55660 removed 3.12.2022 
+# RRYY tag 55843 removed 16.11.2022
+# RWLB (Ginger) tag 21146 removed 12.10.2022
+# RWBY tag 55795 removed 02.10.2022
+# RBRL (Aerial) tag 66903 recap on 19.11.21, mass 62.5
+# RBGB PTT removed 03.11.2023
+# RRGO PTT removed on 03.11.2023
+# RRRG (Antony) PTT removed 24.10.2023 (killed by cat)
+# RLYR did not return (as of 07.09.2022, all 9 other GPS birds returned, and the 2 PTTs)
+
+# nest_fates_summary <- 
+#   nest_fates %>% 
+#   group_by(tag_type, state) %>% summarise(n = n_distinct(nest_id)) %>% 
+#   group_by(tag_type) %>%
+#   mutate(proportion = n / sum(n)) %>%
+#   ungroup()
+# 
+# data = nest_fates_summary
+# 
+# # Calculate the total number of nests for each treatment group
+# totals <- tapply(data$n, data$tag_type, sum)
+# 
+# # Add proportions to the data frame
+# data$proportion <- with(data, n / totals[tag_type])
+# 
+# pairwise_prop_test <- function(data, group1, group2, state, hyp) {
+#   subset_data <- data[data$state == state & data$tag_type %in% c(group1, group2), ]
+#   counts <- subset_data$n
+#   n <- totals[c(group1, group2)]
+#   prop.test(t(matrix(counts)), t(matrix(n)), alternative = hyp)
+# }
+# 
+# GPS_control_fail <- 
+#   pairwise_prop_test(data = nest_fates_summary, 
+#                      group1 = "GPS", group2 = "control", 
+#                      state = "fail", hyp = "less")
+# 
+# PTT_control_fail <- 
+#   pairwise_prop_test(data = nest_fates_summary, 
+#                      group1 = "PTT", group2 = "control", 
+#                      state = "fail", hyp = "greater")
+# 
+# GPS_control_hatch <- 
+#   pairwise_prop_test(data = nest_fates_summary, 
+#                      group1 = "GPS", group2 = "control", 
+#                      state = "brood", hyp = "greater")
+# 
+# PTT_control_hatch <- 
+#   pairwise_prop_test(data = nest_fates_summary, 
+#                      group1 = "PTT", group2 = "control", 
+#                      state = "brood", hyp = "less")
+# 
+# PTT_control_aband <- 
+#   pairwise_prop_test(data = nest_fates_summary, 
+#                      group1 = "PTT", group2 = "control", 
+#                      state = "aband", hyp = "greater")
+# 
+# 
+# group1 = pair[1]
+# group2 = pair[2]
+# # List of states
+# states <- unique(nest_fates_summary$state)
+# 
+# # List of group pairs to compare
+# group_pairs <- list(c("GPS", "control"), c("PTT", "control"), c("PTT", "GPS"))
+# 
+# # Perform pairwise comparisons for each state and each group pair
+# results <- list()
+# 
+# for (state in states) {
+#   for (pair in group_pairs) {
+#     test_result <- pairwise_prop_test(nest_fates_summary, pair[1], pair[2], state)
+#     results[[paste(state, pair[1], "vs", pair[2])]] <- test_result
+#   }
+# }
+# 
+# # Print results
+# for (name in names(results)) {
+#   cat("\nComparison:", name, "\n")
+#   print(results[[name]])
+# }
+# 
+# ggplot(nest_fates_summary, aes(x = tag_type, y = proportion, fill = state)) +
+#   geom_bar(stat = "identity", position = "stack") +
+#   labs(y = "Proportion", x = "Tag Type", title = "Proportions of States by Tag Type")
+# 
+# # Create the contingency table of proportions
+# contingency_table <- table(nest_fates_summary$tag_type, nest_fates_summary$state)
+# 
+# # Perform the Chi-square test
+# chisq_test <- chisq.test(contingency_table)
+# 
+# # View the results
+# chisq_test
+# 
+# # Create a contingency table
+# contingency_table <- table(nest_fates_summary$tag_type, nest_fates_summary$state)
+# 
+# # model <- multinom(state ~ tag_type + season, data = nest_fates)
+# # summary(model)
+# # # Obtain the summary of the model
+# # model_summary <- summary(model)
+# # 
+# # # Extract the z values
+# # z_values <- model_summary$coefficients / model_summary$standard.errors
+# # 
+# # # Calculate p-values
+# # p_values <- 2 * (1 - pnorm(abs(z_values)))
+# # 
+# # # Combine coefficients, z values, and p-values into a data frame
+# # results <- data.frame(
+# #   Coefficients = model_summary$coefficients,
+# #   Z_values = z_values,
+# #   P_values = p_values
+# # )
+# # 
+# # print(results)
+```
+
+
+```{r}
+# Perform pairwise comparisons for tag_type effects
+hypothesis(model_brm, "tag_typeGPS > control")
+hypothesis(model_brm, "tag_typePTT > control")
+
+# Summarize the coefficients
+tag_type_summary <- posterior_summary(tag_type_coeffs)
+print(tag_type_summary)
+
+# View the structure of the posterior samples
+str(post_samples)
+
+# Extract fixed effects summary
+fixed_effects <- 
+  summary(model_brm)$fixed
+
+# Create a data frame for easier manipulation
+fixed_effects_df <- as.data.frame(fixed_effects)
+fixed_effects_df$Parameter <- rownames(fixed_effects_df)
+
+# Select and rename columns for clarity
+plot_data <-
+  fixed_effects_df %>%
+  dplyr::select(Parameter, Estimate, `l-95% CI`, `u-95% CI`) %>%
+  rename(Estimate = Estimate, 
+         Q2.5 = `l-95% CI`, 
+         Q97.5 = `u-95% CI`) %>%
+  filter(Parameter %!in% c("muunkn_tag_typePTT", "muaband_tag_typeGPS")) %>% 
+  filter(str_detect(Parameter, "unkn", negate = TRUE))
+  # filter(grepl("tag_type", Parameter)) %>% 
+  # filter(str_detect("muunkn", Parameter, negate = TRUE)) # Filter to include only the effects of interest (e.g., tag_type)
+
+# Create the forest plot
+ggplot(plot_data, aes(x = Estimate, y = Parameter)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  theme_minimal() +
+  labs(title = "Effect Sizes of Tag Type on Nest State",
+       x = "Estimate",
+       y = "Tag Type") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red")
+
+##
+fixed_effects_df["muaband_tag_typeGPS", "Estimate"] <-
+  fixed_effects_df["muaband_tag_typeGPS", "Estimate"] + fixed_effects_df["muaband_Intercept", "Estimate"]
+
+fixed_effects_df["muaband_tag_typePTT", "Estimate"] <-
+  fixed_effects_df["muaband_tag_typePTT", "Estimate"] + fixed_effects_df["muaband_Intercept", "Estimate"]
+
+fixed_effects_df["mubrood_tag_typeGPS", "Estimate"] <-
+  fixed_effects_df["mubrood_tag_typeGPS", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
+
+fixed_effects_df["mufail_tag_typecontrol", "Estimate"] <-
+  fixed_effects_df["mufail_tag_typecontrol", "Estimate"] + fixed_effects_df["mufail_Intercept", "Estimate"]
+
+fixed_effects_df["mufail_tag_typePTT", "Estimate"] <-
+  fixed_effects_df["mufail_tag_typePTT", "Estimate"] + fixed_effects_df["mufail_Intercept", "Estimate"]
+
+fixed_effects_df["mubrood_tag_typecontrol", "Estimate"] <-
+  fixed_effects_df["mubrood_tag_typecontrol", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
+
+fixed_effects_df["mubrood_tag_typePTT", "Estimate"] <-
+  fixed_effects_df["mubrood_tag_typePTT", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
+##
+fixed_effects_df["muaband_tag_typeGPS", "lci"] <-
+  fixed_effects_df["muaband_tag_typeGPS", "lci"] + fixed_effects_df["muaband_Intercept", "lci"]
+
+fixed_effects_df["muaband_tag_typePTT", "lci"] <-
+  fixed_effects_df["muaband_tag_typePTT", "lci"] + fixed_effects_df["muaband_Intercept", "lci"]
+
+fixed_effects_df["mubrood_tag_typeGPS", "lci"] <-
+  fixed_effects_df["mubrood_tag_typeGPS", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
+
+fixed_effects_df["mufail_tag_typecontrol", "lci"] <-
+  fixed_effects_df["mufail_tag_typecontrol", "lci"] + fixed_effects_df["mufail_Intercept", "lci"]
+
+fixed_effects_df["mufail_tag_typePTT", "lci"] <-
+  fixed_effects_df["mufail_tag_typePTT", "lci"] + fixed_effects_df["mufail_Intercept", "lci"]
+
+fixed_effects_df["mubrood_tag_typecontrol", "lci"] <-
+  fixed_effects_df["mubrood_tag_typecontrol", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
+
+fixed_effects_df["mubrood_tag_typePTT", "lci"] <-
+  fixed_effects_df["mubrood_tag_typePTT", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
+##
+fixed_effects_df["muaband_tag_typeGPS", "uci"] <-
+  fixed_effects_df["muaband_tag_typeGPS", "uci"] + fixed_effects_df["muaband_Intercept", "uci"]
+
+fixed_effects_df["muaband_tag_typePTT", "uci"] <-
+  fixed_effects_df["muaband_tag_typePTT", "uci"] + fixed_effects_df["muaband_Intercept", "uci"]
+
+fixed_effects_df["mubrood_tag_typeGPS", "uci"] <-
+  fixed_effects_df["mubrood_tag_typeGPS", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
+
+fixed_effects_df["mufail_tag_typecontrol", "uci"] <-
+  fixed_effects_df["mufail_tag_typecontrol", "uci"] + fixed_effects_df["mufail_Intercept", "uci"]
+
+fixed_effects_df["mufail_tag_typePTT", "uci"] <-
+  fixed_effects_df["mufail_tag_typePTT", "uci"] + fixed_effects_df["mufail_Intercept", "uci"]
+
+fixed_effects_df["mubrood_tag_typecontrol", "uci"] <-
+  fixed_effects_df["mubrood_tag_typecontrol", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
+
+fixed_effects_df["mubrood_tag_typePTT", "uci"] <-
+  fixed_effects_df["mubrood_tag_typePTT", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
+
+# Function to calculate probabilities from log odds
+log_odds_to_prob <- function(log_odds) {
+  exp(log_odds) / (1 + exp(log_odds))
+}
+
+fixed_effects_df_ <- 
+  fixed_effects_df %>%
+  filter(!is.na(Estimate)) %>% 
+  mutate(across(c(Estimate, lci, uci), log_odds_to_prob)) %>% 
+  as.tibble()
+
+fixed_effects_df_a_b_G_P
+
+fixed_effects_df_f_b_c_P <- 
+  fixed_effects_df_
+
+# Extract fixed effects summary
+fixed_effects <- summary(model_brm)$fixed
+
+# Create a data frame for easier manipulation
+fixed_effects_df <- as.data.frame(fixed_effects)
+fixed_effects_df$Parameter <- rownames(fixed_effects_df)
+
+# Function to calculate probabilities from log odds
+log_odds_to_prob <- function(log_odds) {
+  exp(log_odds) / (1 + exp(log_odds))
+}
+
+# Extract the intercepts
+intercepts <- fixed_effects_df %>%
+  filter(grepl("Intercept", Parameter))
+
+# Extract the tag type effects
+tag_effects <- fixed_effects_df %>%
+  filter(grepl("tag_type", Parameter))
+
+# Calculate the probabilities for each state, including credible intervals
+states <- unique(data$state)
+probabilities <- data.frame(State = character(), 
+                             Tag_Type = character(), 
+                             Probability = numeric(), 
+                             `l-95% CI` = numeric(), 
+                             `u-95% CI` = numeric())
+
+for (state in states) {
+  intercept <- intercepts %>% filter(grepl(state, Parameter)) 
+  intercept_est <- intercept$Estimate
+  intercept_lower <- intercept$`l-95% CI`
+  intercept_upper <- intercept$`u-95% CI`
+  
+  for (tag in levels(data$tag_type)) {
+    tag_effect <- tag_effects %>% 
+      filter(grepl(paste0("tag_type", tag), Parameter) & grepl(state, Parameter))
+    
+    # Ensure we are getting only 1 row for tag effect (should be one for each state)
+    if (nrow(tag_effect) == 1) {
+      tag_est <- tag_effect$Estimate
+      tag_lower <- tag_effect$Q2.5
+      tag_upper <- tag_effect$Q97.5
+      
+      # Calculate the log odds for the intercept and tag type effect
+      log_odds_est <- intercept_est + tag_est
+      log_odds_lower <- intercept_lower + tag_lower
+      log_odds_upper <- intercept_upper + tag_upper
+      
+      # Convert log odds to probabilities
+      prob_est <- log_odds_to_prob(log_odds_est)
+      prob_lower <- log_odds_to_prob(log_odds_lower)
+      prob_upper <- log_odds_to_prob(log_odds_upper)
+      
+      # Store the results
+      probabilities <- rbind(probabilities, data.frame(State = state, 
+                                                       Tag_Type = tag, 
+                                                       Probability = prob_est, 
+                                                       `l-95% CI` = prob_lower, 
+                                                       `u-95% CI` = prob_upper))
+    } else {
+      message("Multiple rows found for tag_effects in state: ", state, " and tag_type: ", tag)
+    }
+  }
+}
+
+# Plot the probabilities with credible intervals
+ggplot(probabilities, aes(x = Tag_Type, y = Probability, color = Tag_Type)) +
+  geom_point(size = 3) +  # Add points for the probabilities
+  geom_errorbar(aes(ymin = `l-95% CI`, ymax = `u-95% CI`), width = 0.2) +  # Add vertical error bars for the credible intervals
+  facet_wrap(~State, scales = "free_y") +  # Facet by state with free y-axis scales
+  scale_color_manual(values = c("control" = "blue", "PTT" = "red", "GPS" = "green", "other" = "purple")) +  # Customize colors for each tag_type
+  theme_minimal() +  # Use a minimal theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+        strip.text = element_text(size = 12),  # Increase size of facet labels
+        legend.position = "none") +  # Remove legend (optional)
+  labs(x = "Tag Type", y = "Probability", title = "Probabilities with 95% Credible Intervals")
+
+# Extract the intercepts
+intercepts <- fixed_effects_df %>%
+  filter(grepl("Intercept", Parameter))
+
+# Extract the tag type effects
+tag_effects <- fixed_effects_df %>%
+  filter(grepl("tag_type", Parameter))
+
+# Calculate the probabilities for each state, including credible intervals
+states <- unique(data$state)
+tag_types <- unique(data$tag_type)
+probabilities <- data.frame(State = character(), 
+                             Tag_Type = character(), 
+                             Probability = numeric(), 
+                             `l-95% CI` = numeric(), 
+                             `u-95% CI` = numeric())
+
+for (state in states) {
+  intercept <- intercepts %>% filter(grepl(state, Parameter)) 
+  intercept_est <- intercept$Estimate
+  intercept_lower <- intercept$`l-95% CI`
+  intercept_upper <- intercept$`u-95% CI`
+  
+  for (tag in tag_types) {
+    for (i in 1:nrow())
+    tag_effect <- tag_effects %>% filter(grepl(paste0("tag_type", tag), Parameter)) 
+    tag_est <- tag_effect$Estimate
+    tag_lower <- tag_effect$`l-95% CI`
+    tag_upper <- tag_effect$`u-95% CI`
+    
+    # Calculate the log odds for the intercept and tag type effect
+    log_odds_est <- intercept_est + tag_est
+    log_odds_lower <- intercept_lower + tag_lower
+    log_odds_upper <- intercept_upper + tag_upper
+    
+    # Convert log odds to probabilities
+    prob_est <- log_odds_to_prob(log_odds_est)
+    prob_lower <- log_odds_to_prob(log_odds_lower)
+    prob_upper <- log_odds_to_prob(log_odds_upper)
+    
+    # Store the results
+    probabilities <- rbind(probabilities, data.frame(State = state, 
+                                                     Tag_Type = tag, 
+                                                     Probability = prob_est, 
+                                                     `l-95% CI` = prob_lower, 
+                                                     `u-95% CI` = prob_upper))
+  }
+}
+
+# Print the probabilities with credible intervals
+print(probabilities)
+
+# Select and rename columns for clarity
+plot_data <-
+  fixed_effects_df %>%
+  dplyr::select(Parameter, Estimate, `l-95% CI`, `u-95% CI`) %>%
+  rename(Estimate = Estimate, 
+         Q2.5 = `l-95% CI`, 
+         Q97.5 = `u-95% CI`) #%>% 
+  # filter(grepl("tag_type", Parameter)) %>% 
+  # filter(str_detect("muunkn", Parameter, negate = TRUE)) # Filter to include only the effects of interest (e.g., tag_type)
+
+# Create the forest plot
+ggplot(plot_data, aes(x = Estimate, y = Parameter)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+  theme_minimal() +
+  labs(title = "Effect Sizes of Tag Type on Nest State",
+       x = "Estimate",
+       y = "Tag Type") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red")
+
+# Reorder the levels for plotting
+# plot_data$Parameter <- factor(plot_data$Parameter, 
+
+# Plot diagnostics
+plot(model_brm)
+
+# Check R-hat values
+rhat(model_brm)
+
+# Check effective sample sizes
+neff_ratio(model_brm)
+
+# Posterior predictive checks
+pp_check(model_brm)
+
+# Generate predictions from the posterior distribution
+y_rep <- posterior_predict(model_brm)
+
+# Compare summary statistics (e.g., mean, variance) of observed vs. predicted data
+pp_check(model_brm, type = "stat", stat = "mean")
+pp_check(model_brm, type = "stat", stat = "var")
+
+# Predicted counts
+predicted_counts <- apply(y_rep, 2, function(col) table(factor(col, levels = levels(nest_fates$state))))
+predicted_counts <- colMeans(predicted_counts)
+
+# Observed counts
+observed_counts <- table(nest_fates$state)
+
+# Combine into a data frame for plotting
+validation_data <- data.frame(
+  state = levels(nest_fates$state),
+  observed = as.vector(observed_counts),
+  predicted = as.vector(predicted_counts)
+)
+
+# Plotting observed vs predicted counts
+library(ggplot2)
+ggplot(validation_data, aes(x = state)) +
+  geom_bar(aes(y = observed, fill = "Observed"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = predicted, fill = "Predicted"), stat = "identity", position = "dodge") +
+  scale_fill_manual(name = "Count Type", values = c("Observed" = "blue", "Predicted" = "red")) +
+  labs(title = "Observed vs Predicted Counts", x = "State", y = "Count")
+
+
+# Residual diagnostics
+residuals <- residuals(model)
+plot(residuals)
+
+# Fit the mixed-effects logistic regression model
+model <- glmer(state ~ tag_type + (1 | season) + (1 | parent), 
+               data = nest_fates, 
+               family = binomial)
+
+# Check the model summary
+summary(model)
+
+state_summary <-
   bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
   mutate(nest_id = paste(year(date), nest_id, sep = "_")) %>% 
-  group_by(nest_id, parent, tag_type) %>% 
+  filter(!is.na(state)) %>% 
+  group_by(nest_id, parent, tag_type) %>%
   dplyr::summarise(state = min(as.numeric(state), na.rm = TRUE)) %>% 
   group_by(tag_type, state) %>% 
   summarise(n_nests = n_distinct(nest_id)) %>% 
@@ -1427,10 +2610,51 @@ state_summary <-
                         ifelse(state == 2, "aband", 
                                ifelse(state == 3, "brood", 
                                       ifelse(state == 4, "unkn", "xxx"))))) %>% 
-  ungroup()
+  ungroup() %>% 
+  bind_rows(., data.frame(tag_type = c("GPS", "PTT"), 
+                          state = c("aband", "unkn"), 
+                          n_nests = c(0, 0)))
+
+data = state_summary
 
 # Calculate the total number of nests for each treatment group
-state_summary$proportion <- with(state_summary, n_nests / tapply(n_nests, tag_type, sum)[tag_type])
+totals <- tapply(data$n_nests, data$tag_type, sum)
+
+# Add proportions to the data frame
+data$proportion <- with(data, n_nests / totals[tag_type])
+
+# Function to perform pairwise comparison for a given state
+pairwise_prop_test <- function(data, group1, group2, state) {
+  subset_data <- data[data$state == state & data$tag_type %in% c(group1, group2), ]
+  counts <- subset_data$n_nests
+  n <- totals[c(group1, group2)]
+  prop.test(counts, n)
+}
+
+
+# List of states
+states <- unique(data$state)
+
+# List of group pairs to compare
+group_pairs <- list(c("GPS", "control"), c("PTT", "control"), c("PTT", "GPS"))
+
+# Perform pairwise comparisons for each state and each group pair
+results <- list()
+
+for (state in states) {
+  for (pair in group_pairs) {
+    test_result <- pairwise_prop_test(data, pair[1], pair[2], state)
+    results[[paste(state, pair[1], "vs", pair[2])]] <- test_result
+  }
+}
+
+# Print results
+for (name in names(results)) {
+  cat("\nComparison:", name, "\n")
+  print(results[[name]])
+}
+
+
 
 contingency_table <- xtabs(proportion ~ tag_type + state, data = state_summary)
 chi_square_test <- chisq.test(contingency_table)
