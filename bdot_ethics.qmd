@@ -75,7 +75,7 @@ packages_required_in_project <- c("dbo", "data.table", "apis", "stringr", "glue"
                                   "gtsummary", "RColorBrewer", "rptR", "partR2",
                                   "multcomp", "effects", "gt", "scales", "readxl", 
                                   "colorspace", "showtext", "MuMIn", "here", "nnet",
-                                  "brms", "ggeffects")
+                                  "brms", "ggeffects", "RMark", "tidybayes")
 
 # of the required packages, check if some need to be installed
 new.packages <- 
@@ -163,8 +163,6 @@ caps_2024 <-
   filter(ring != "CP16483" & weight != 63.8)# %>% 
   # filter(ring == "CP16134")
 
-dbq(con, "SELECT * FROM CAPTURES") %>% filter(ring == "CP9075")
-
 # pre-2024 data 
 caps_pre2024 <-
   read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
@@ -195,10 +193,7 @@ caps_pre2024 <-
          tag_id = tag,
          nest_id = ID) %>% 
   dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, wing, tag_id)
-
-caps_pre2024 %>% 
   
-
 colour_band = 0.08
 metal_band = 0.16
 
@@ -216,7 +211,7 @@ all_caps <-
 
 # tag deployment information
 tag_info <- 
-  read.csv("/Users/luketheduke2/ownCloud/kemp_projects/bdot/data/field/Kaikoura_tag_and_control_weights_Luke_2021_2022.csv") %>% 
+  read.csv("/Users/leberhart/ownCloud/kemp_projects/bdot/data/field/Kaikoura_tag_and_control_weights_Luke_2021_2022.csv") %>% 
   dplyr::select(ring, tag, tag_type, treatment_group) %>% 
   filter(tag != 0) %>% 
   distinct() %>% 
@@ -692,7 +687,7 @@ smi_wing_lmer_table
 #### sequence of measures ----
 # determine the first obs for birds that had repeated measures
 first_obs <- 
-  stats_smi_wing_lmer_ols$data %>%
+  all_caps_KK_smi %>%
   group_by(ring) %>% 
   # mutate(n_obs = n()) %>% 
   # filter(n_obs > 1) %>% 
@@ -707,7 +702,7 @@ first_obs <-
 
 # wrangle the repeated measures data
 repeated_measures <-
-  stats_smi_wing_lmer_ols$data %>%
+  all_caps_KK_smi %>%
   group_by(ring) %>% 
   mutate(n_obs = n()) %>% 
   filter(n_obs > 1) %>% 
@@ -740,9 +735,41 @@ smi_wing_lmer_seq <-
   lmer(smi_wing ~ tag_type * measure + (1 | ring), 
        data = repeated_measures)
 
+# Set or adjust priors if necessary
+prior <- c(
+  set_prior("normal(0, 10)", class = "b"),
+  set_prior("cauchy(0, 2)", class = "sd")
+)
+
+smi_wing_brm <- brm(
+  smi_wing ~ tag_type * measure + (1 | ring), 
+  data = repeated_measures,
+  family = gaussian(), 
+  prior = prior, 
+  chains = 4, 
+  cores = 4, 
+  iter = 4000,  
+  warmup = 2000
+)
+
+# Summary of the brms model
+summary(smi_wing_brm)
+
+# Check Effective Sample Size and R-hat
+print(smi_wing_brm)
+
+# Plot the posterior distributions
+plot(smi_wing_brm)
+
+# Posterior predictive checks
+pp_check(smi_wing_brm)
+
 # Derive confidence intervals of effect sizes from parametric bootstrapping
 tidy_smi_wing_lmer_seq <-
   tidy(smi_wing_lmer_seq, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+tidy_smi_wing_brm <-
+  tidy(smi_wing_brm, conf.int = TRUE)
 
 # run rptR to obtain repeatabilities of random effects
 rpt_smi_wing_lmer_seq <-
@@ -1457,17 +1484,51 @@ nest_fates <-
   dplyr::select(-c("nickname", "deployment_date", "recapture_date", "comment", "last_argos_data")) %>% 
   mutate(state = factor(state, levels = c("aband", "fail", "brood", "fledge", "unkn")),
          tag_type = factor(tag_type, levels = c("control", "GPS", "PTT")))
+
+bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
+  mutate(season = ifelse(month(date) < 7, year(date) - 1, year(date))) %>% 
+  dplyr::select(nest_id, nest_fate, fledged, season, tag_type, parent) %>% 
+  filter(fledged > 0 & !is.na(nest_fate)) %>% 
+  distinct() %>% 
+  mutate(fledged = as.numeric(fledged)) %>% 
+  group_by(season, tag_type) %>% 
+  summarise(total_fledged = sum(fledged))
 ```
 
 ### modelling
 ```{r}
-# Fit the mixed-effects multinomial logistic regression model
-model_brm <- brm(state ~ tag_type + (1 | season) + (1 | parent), 
-                 data = nest_fates, 
-                 family = categorical(link = "logit"),
-  chains = 4, 
-  iter = 2000,
-  control = list(adapt_delta = 0.95))
+# ## get all parameters and parameters classes to define priors on
+# prior <- 
+#    default_prior(state ~ tag_type + (1 | season) + (1 | parent),
+#                  data = nest_fates, family = categorical(link = "logit"))
+# 
+# # Check the prior names to ensure we set them correctly
+# default_priors <- get_prior(
+#   state ~ tag_type + (1 | season) + (1 | parent),
+#   data = nest_fates,
+#   family = categorical(link = "logit")
+# )
+# 
+# # Print the default priors to inspect the model parameters
+# print(default_priors)
+# 
+# # Set the correct priors based on the parameter names from get_prior()
+# priors <-
+#   default_priors %>% 
+#   mutate(prior = ifelse(class == "b", "normal(0, 5)", prior))
+
+# Fit the mixed-effects multinomial logistic regression model with informative priors
+model_brm <- brm(
+  state ~ tag_type + (1 | season) + (1 | parent),
+  data = nest_fates,
+  family = categorical(link = "logit"),
+  chains = 4,
+  iter = 4000,  # Increased number of iterations
+  control = list(adapt_delta = 0.99, max_treedepth = 15)  # Adjusted control parameters for better convergence
+  # prior = priors  # Use the defined priors
+)
+
+summary(model_brm)
 
 # Extract the posterior samples
 post_samples <- posterior_samples(model_brm)
@@ -1496,8 +1557,14 @@ plot(conditional_effects_plot)
 # Coefficient plot for fixed effects
 mcmc_plot(model_brm, pars = "^b_")
 
-# Create effect plot for 'tag_type' using ggpredict
-predictions_tag_type <- ggpredict(model_brm, terms = "tag_type", type = "fixed")
+# Generate predictions with interval set to "prediction"
+predictions_tag_type <- 
+  ggpredict(model_brm, 
+            terms = "tag_type", 
+            type = "fixed", 
+            # interval = "prediction",
+            bias_correction = TRUE
+            )
 
 plot(predictions_tag_type) +
   labs(title = "Effect of Tag Type on Predicted State Probabilities",
@@ -1596,7 +1663,6 @@ bdot_ch <-
   data.frame(ch = apply(bdot_ch[, 2:4], 1, paste, collapse = ""),
              freq = 1)
 
-library(RMark)
 # Specify the states and create the dataframe for RMark
 bdot_processed <- process.data(bdot_ch, model = "Multistrata", groups = NULL)
 bdot_ddl <- make.design.data(bdot_processed)
@@ -1609,8 +1675,6 @@ p.model <- list(formula = ~ stratum)  # Detection probability depends on the sta
 Psi.model.stratum <- list(formula = ~ -1+stratum)  
 Psi.model.stratumto <- list(formula = ~ -1+stratum:tostratum) 
 Psi.model.stratumtotime <- list(formula = ~ -1+stratum:tostratum:time)  # Transition probabilities depend on the state and destination state
-
-
 
 model.list <- create.model.list("Multistrata") 
 bdot.results <- mark.wrapper(model.list, data = bdot_processed, ddl = bdot_ddl)
@@ -1922,7 +1986,6 @@ tag_type_p_plot <-
 # print(ms_results)
 
 ```
-
 
 
 # Movements of tagged birds
