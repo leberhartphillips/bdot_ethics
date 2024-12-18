@@ -1692,6 +1692,10 @@ bdot_ch <-
   data.frame(ch = apply(bdot_ch[, 2:4], 1, paste, collapse = ""),
              freq = 1)
 
+bdot_ch %>% 
+  group_by(ch) %>% 
+  summarise(n())
+
 # Specify the states and create the dataframe for RMark
 bdot_processed <- process.data(bdot_ch, model = "Multistrata", groups = NULL)
 bdot_ddl <- make.design.data(bdot_processed)
