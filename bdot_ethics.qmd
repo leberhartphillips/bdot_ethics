@@ -808,7 +808,7 @@ stats_smi_wing_lmer_seq <-
        partR2c = R2c_smi_wing_lmer_seq,
        data = repeated_measures)
 
-summary(glht(smi_wing_lmer_seq))
+# summary(glht(smi_wing_lmer_seq))
 
 #### Table of effect sizes ----
 # Retrieve sample sizes
@@ -964,6 +964,13 @@ bdot_treatment_group_facets <- c('GPS' = "1.3g GPS tag",
                                  'PTT' = "1.8g PTT tag", 
                                  'control' = "control")
 
+bdot_breeding_fate_facets <- c('aband' = "abandoned", 
+                                 'fail' = "nest failure", 
+                                 'brood' = "hatched",
+                               'fledge' = "fledged chicks",
+                               'unkn' = "unknown fate")
+
+
 custom_colors <- brewer.pal(9, "Pastel1")[c(9, 2, 3)]
 
 # Add Google font Lato
@@ -982,8 +989,8 @@ repeated_measures_ <-
 ggplot(data = repeated_measures_) + 
   geom_line(aes(x = x_line, y = smi_wing, group = ring), color = "grey40", alpha = 0.5) + 
   geom_jitter(size = 6, aes(x = x_point, y = smi_wing, fill = tag_type, shape = measure), 
-             shape = 21, color = "grey40", alpha = 0.75, width = 0.075) +
-  scale_shape_manual(values = c(21, 24)) +
+             shape = 21, color = "grey40", alpha = 1, width = 0.075) +
+  # scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = custom_colors) +
   facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
   theme(legend.position = "none",
@@ -1008,44 +1015,44 @@ ggplot(data = repeated_measures_) +
   # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
   #            color = "grey", linetype = "dashed") +
   xlab("capture event") +
-  ylab("scaled body mass index (g)") +
-  geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
-             color = "grey", linetype = "dashed") +
-  geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
-             color = "grey", linetype = "dashed")
-
-ggplot(data = repeated_measures_) + 
-  geom_line(aes(x = x_line, y = weight, group = ring), color = "grey40", alpha = 0.5) + 
-  geom_jitter(size = 6, aes(x = x_point, y = weight, fill = tag_type, shape = measure), 
-              shape = 21, color = "grey40", alpha = 0.75, width = 0.075) +
-  scale_shape_manual(values = c(21, 24)) +
-  scale_fill_manual(values = custom_colors) +
-  facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
-  theme(legend.position = "none",
-        text = element_text(family = "lato"),
-        axis.title = element_text(size = 11, colour = "grey40"),
-        axis.ticks = element_blank(),
-        # axis.ticks.length = unit(0.1, "cm"),
-        axis.text = element_text(size = 10, colour = "grey40"),
-        axis.title.y = element_text(size = 12),
-        axis.text.y = element_text(size = 10),
-        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
-        panel.background = element_rect(fill = 'transparent', color = NA),
-        plot.background = element_rect(fill = 'transparent', color = NA), 
-        strip.background = element_rect(fill = 'transparent', color = NA),
-        strip.text = element_text(size = 13, colour = "grey40"),
-        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
-        panel.grid.minor.y = element_line(size = 0.25, lineend = "round", colour = "grey90")) +
-  scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first", "second")) +
-  # scale_y_continuous(limits = c(43, 73)) +
-  geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
-             color = "grey", linetype = "dashed") +
-  geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
-             color = "grey", linetype = "dashed") +
-  # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
+  ylab("scaled body mass index (g)")# +
+  # geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
   #            color = "grey", linetype = "dashed") +
-  xlab("capture event") +
-  ylab("raw body mass (g)")
+  # geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
+  #            color = "grey", linetype = "dashed")
+
+# ggplot(data = repeated_measures_) + 
+#   geom_line(aes(x = x_line, y = weight, group = ring), color = "grey40", alpha = 0.5) + 
+#   geom_jitter(size = 6, aes(x = x_point, y = weight, fill = tag_type, shape = measure), 
+#               shape = 21, color = "grey40", alpha = 0.75, width = 0.075) +
+#   scale_shape_manual(values = c(21, 24)) +
+#   scale_fill_manual(values = custom_colors) +
+#   facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
+#   theme(legend.position = "none",
+#         text = element_text(family = "lato"),
+#         axis.title = element_text(size = 11, colour = "grey40"),
+#         axis.ticks = element_blank(),
+#         # axis.ticks.length = unit(0.1, "cm"),
+#         axis.text = element_text(size = 10, colour = "grey40"),
+#         axis.title.y = element_text(size = 12),
+#         axis.text.y = element_text(size = 10),
+#         plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+#         panel.background = element_rect(fill = 'transparent', color = NA),
+#         plot.background = element_rect(fill = 'transparent', color = NA), 
+#         strip.background = element_rect(fill = 'transparent', color = NA),
+#         strip.text = element_text(size = 13, colour = "grey40"),
+#         panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+#         panel.grid.minor.y = element_line(size = 0.25, lineend = "round", colour = "grey90")) +
+#   scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first", "second")) +
+#   # scale_y_continuous(limits = c(43, 73)) +
+#   geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
+#              color = "grey", linetype = "dashed") +
+#   geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
+#              color = "grey", linetype = "dashed") +
+#   # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
+#   #            color = "grey", linetype = "dashed") +
+#   xlab("capture event") +
+#   ylab("raw body mass (g)")
 
 ```
 
@@ -1485,21 +1492,21 @@ nest_fates <-
   mutate(state = factor(state, levels = c("aband", "fail", "brood", "fledge", "unkn")),
          tag_type = factor(tag_type, levels = c("control", "GPS", "PTT")))
 
-bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
-  mutate(season = ifelse(month(date) < 7, year(date) - 1, year(date))) %>% 
-  # dplyr::select(nest_id, nest_fate, fledged, season, tag_type, parent) %>% 
-  left_join(., tag_date_info %>% dplyr::select(-tag_type), by = "parent") %>% 
-  mutate(tag_type = as.character(tag_type)) %>%
-  mutate(tag_type = ifelse(!is.na(deployment_date) & !is.na(recapture_date) & (date < deployment_date | date >= recapture_date), 
-                           "control", tag_type)) %>% 
-  filter(fledged > 0 & !is.na(nest_fate)) %>% 
-  distinct() %>% 
-  group_by(nest_id) %>% 
-  slice_tail(n = 1) %>% 
-  arrange(date)
-  mutate(fledged = as.numeric(fledged)) %>% 
-  group_by(season, tag_type) %>% 
-  summarise(total_fledged = sum(fledged))
+# bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
+#   mutate(season = ifelse(month(date) < 7, year(date) - 1, year(date))) %>% 
+#   # dplyr::select(nest_id, nest_fate, fledged, season, tag_type, parent) %>% 
+#   left_join(., tag_date_info %>% dplyr::select(-tag_type), by = "parent") %>% 
+#   mutate(tag_type = as.character(tag_type)) %>%
+#   mutate(tag_type = ifelse(!is.na(deployment_date) & !is.na(recapture_date) & (date < deployment_date | date >= recapture_date), 
+#                            "control", tag_type)) %>% 
+#   filter(fledged > 0 & !is.na(nest_fate)) %>% 
+#   distinct() %>% 
+#   group_by(nest_id) %>% 
+#   slice_tail(n = 1) %>% 
+#   arrange(date)
+#   mutate(fledged = as.numeric(fledged)) %>% 
+#   group_by(season, tag_type) %>% 
+#   summarise(total_fledged = sum(fledged))
 
 nest_fates
 
@@ -1600,6 +1607,44 @@ plot(predictions_tag_type) +
        x = "Tag Type", y = "Predicted Probability") +
   theme_minimal()
 
+predictions_tag_type_ <- 
+  predictions_tag_type %>% 
+  as.data.frame() %>% 
+  mutate(response.level = factor(response.level, levels = c("brood", "fledge", "fail", "aband", "unkn")))
+
+# Assuming 'nest_fates' is your data frame
+# Calculate the sample sizes
+sample_sizes <- nest_fates %>%
+  group_by(tag_type, state) %>%
+  summarise(n = n()) %>%
+  ungroup() %>% 
+  rename(x = tag_type, 
+         response.level = state) %>% 
+  bind_rows(., data.frame(x = c("GPS", "GPS", "PTT"), response.level = c("fledge", "aband", "unkn"), n = c(0, 0, 0)))
+
+# Merge the sample sizes with your predictions
+predictions_tag_type_ <- predictions_tag_type_ %>%
+  left_join(sample_sizes, by = c("x", "response.level"))
+
+custom_colors_ <- brewer.pal(9, "Set1")[c(9, 2, 3)]
+
+
+# tag_type_breeding_fate_plot <-
+  ggplot(data = predictions_tag_type_) +
+  geom_errorbar(aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high, color = x), 
+               size = 0.3, linetype = "solid", width = 0.1) +
+  geom_point(aes(x = x, y = predicted, fill = x), shape = 21, size = 6) +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors_) +
+  geom_text(aes(label = n, y = 1, x = x),  # Adjust 'y' to place the text appropriately
+            size = 3, color = "black", vjust = 0) +  # Adjust 'size' and 'vjust' as needed +
+  theme_bw() + 
+  dipper_theme +
+  ylab("Probability (± 95% CI)") +
+  scale_y_continuous(limits = c(0, 1)) +
+  # scale_color_brewer(palette = "Set1") +
+  facet_grid(~ response.level, labeller = as_labeller(bdot_breeding_fate_facets))
+
 # Calculate sample sizes
 sample_sizes <- nest_fates %>%
   group_by(tag_type, state) %>%
@@ -1695,10 +1740,21 @@ bdot_ch <-
 bdot_ch %>% 
   group_by(ch) %>% 
   summarise(n())
+```
 
+
+```{r}
 # Specify the states and create the dataframe for RMark
 bdot_processed <- process.data(bdot_ch, model = "Multistrata", groups = NULL)
+
+
 bdot_ddl <- make.design.data(bdot_processed)
+
+# bdot_ddl$Psi$fix=NA
+# bdot_ddl$Psi$fix[bdot_ddl$Psi$stratum=="G" & bdot_ddl$Psi$tostratum=="P"]=0
+# bdot_ddl$Psi$fix[bdot_ddl$Psi$stratum=="P" & bdot_ddl$Psi$tostratum=="G"]=0
+# bdot_ddl$Psi
+# summary(mark(dp,ddl,output=FALSE),show.fixed=TRUE)
 
 table(bdot_ddl$Psi[,c("stratum","tostratum")])
 
@@ -1754,15 +1810,10 @@ bdot_ch %>%
   mutate(tag_type = ifelse(str_detect(ch, "P"), "PTT",
                            ifelse(str_detect(ch, "G"), "GPS",
                                   ifelse(str_detect(ch, "C"), "control", NA)))) %>% 
-  # dplyr::select(ring, age) %>%
-  # distinct() %>% 
   group_by(tag_type) %>% 
   summarise(N = n())
 
-# age-specific apparent survival plot
-dipper_df_ch_sex %>% 
-  group_by(sex) %>% 
-  summarise(N = n())
+bdot_estimates %>% as.tibble() %>% print(n = nrow(.))
 
 tag_type_surv_plot <- 
   ggplot(data = filter(bdot_estimates, parameter == "Phi"),
@@ -1805,6 +1856,8 @@ tag_type_p_plot <-
   annotate(geom = "text", y = 0.45, x = 3, angle = 0,
            label = "N = 10", 
            color = "grey30", size = 2.5, fontface = 'italic')
+
+tag_type_p_plot
 ```
 
 
