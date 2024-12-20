@@ -1628,7 +1628,6 @@ predictions_tag_type_ <- predictions_tag_type_ %>%
 
 custom_colors_ <- brewer.pal(9, "Set1")[c(9, 2, 3)]
 
-
 # tag_type_breeding_fate_plot <-
   ggplot(data = predictions_tag_type_) +
   geom_errorbar(aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high, color = x), 
@@ -2076,6 +2075,650 @@ tag_type_p_plot
 
 # Movements of tagged birds
 ```{r}
+# function to read tagging data
+import_plover_tag_spatial_fun <- 
+  function(data_loc, tag_ID, projection,
+           time_zone = "America/Mazatlan",
+           tag_model, bird_ID, bird_sex, bird_code, 
+           species, population, n_slice){
+    
+    if(tag_model == "nanoFix-mini")
+    {
+      # read data file and extract data
+      Tag <- 
+        read.table(sep = ",", skip = 5, file = data_loc) %>% 
+        
+        # assign column names
+        `colnames<-` (c("day", "month", "year", "hour", "minute", "second", "unknown_col", 
+                        "satellites", "latitude", "longitude", "elevation", 
+                        "clock_offset", "accuracy_indicator", "battery")) %>% 
+        
+        mutate(
+          # make a fix number column
+          fix_number = str_pad(row.names(.), 2, pad = "0"),
+          
+          # make a timestamp column
+          timestamp = paste(paste(year, month, 
+                                  day, sep = "-"), 
+                            paste(hour, minute, 
+                                  second, sep = ":"), sep = " ")) %>% 
+        mutate(
+          # convert to a useable POSIX time/date string
+          timestamp = as.POSIXct(strptime(as.character(timestamp), 
+                                          format = "%y-%m-%d %H:%M:%S"), 
+                                 tz = time_zone),
+          
+          # assign name of tag
+          tag_ID = tag_ID,
+          
+          # make a simplified version of the time sting
+          timestamp_simple = as.Date(str_sub(as.character(timestamp), 
+                                             start = 1, end = 10), 
+                                     format = "%Y-%m-%d")) %>% 
+        
+        # remove observations without a reliable location
+        dplyr::filter(latitude != 0 & !is.na(latitude)) %>%
+        
+        # remove observations without a reliable location
+        dplyr::filter(timestamp != 0 & !is.na(timestamp)) %>%
+        
+        # names() %>% 
+        # as.data.frame()
+        
+        dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
+                      satellites, latitude, longitude, elevation, battery) %>% 
+        
+        mutate(# assign bird ring
+          ring = bird_ID,
+          
+          # assign sex of bird
+          sex = bird_sex, 
+          
+          # assign bird color combo
+          code = bird_code,
+          
+          # assign bird species
+          species = species,
+          
+          # assign bird population
+          population = population,
+          
+          satellites = as.character(satellites)) %>% 
+        
+        # make the dataframe a SpatialPointsDataFrame and define coordinates
+        `coordinates<-` (c("longitude", "latitude")) %>% 
+        
+        # define projection
+        `proj4string<-` (projection)
+      
+      # output result
+      Tag
+    }
+    else if(tag_model == "PinPoint-10"){
+      if(n_slice == 0){
+        # read data file and extract data
+        Tag <- 
+          read.table(sep = "", na.strings = "", file = data_loc, fill = TRUE,
+                     stringsAsFactors = FALSE, header = TRUE) %>% 
+          
+          mutate(
+            # extract the temporal information from the string
+            year = paste0("20", str_sub(string = RTC.date, start = 1, end = 2)),
+            month = paste0(str_sub(string = RTC.date, start = 4, end = 5)),
+            day = paste0(str_sub(string = RTC.date, start = 7, end = 8)),
+            hour = paste0(str_sub(string = RTC.time, start = 1, end = 2)),
+            minute = paste0(str_sub(string = RTC.time, start = 4, end = 5)),
+            second = paste0(str_sub(string = RTC.time, start = 7, end = 8))
+          ) %>% 
+          
+          mutate(
+            # Merge the time and date columns together to formulate the time stamp for a given row
+            timestamp = ISOdate(year = year, month = month, day = day, 
+                                hour = hour, min = minute, sec = second, 
+                                tz = time_zone),
+            
+            # Tag$datetime[nrow(Tag)] = Tag$datetime[nrow(Tag)] + 8 * 60 * 60,
+            # 
+            # Tag$hour[nrow(Tag)] = as.character(as.numeric(Tag$hour[nrow(Tag)]) + 8),
+            # 
+            # timestamp = paste0(year, "-", month, "-", day, " ", hour, ":", minute, ":", second)
+            
+            timestamp_simple = as.Date(str_sub(as.character(timestamp), 
+                                               start = 1, end = 10), 
+                                       format = "%Y-%m-%d"),          
+            # make a fix number column
+            fix_number = str_pad(row.names(.), 2, pad = "0"),
+            
+            # assign name of tag
+            tag_ID = tag_ID
+          ) %>% 
+          
+          # remove observations without a reliable location
+          dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
+                        Sats, Latitude, Longitude, Altitude.m.) %>% 
+          
+          `colnames<-` (tolower(names(.))) %>% 
+          
+          rename(satellites = sats,
+                 tag_ID = tag_id,
+                 elevation = altitude.m.) %>% 
+          
+          mutate(battery = NA,
+            # assign bird ring
+            ring = bird_ID,
+            
+            # assign sex of bird
+            sex = bird_sex, 
+            
+            # assign bird color combo
+            code = bird_code,
+            
+            # assign bird species
+            species = species,
+            
+            # assign bird population
+            population = population,
+            
+            satellites = as.character(satellites)) %>% 
+          
+          # remove observations without a reliable location
+          filter(latitude != 0 | !is.na(latitude)) %>% 
+          
+          # make the dataframe a SpatialPointsDataFrame and define coordinates
+          `coordinates<-` (c("longitude", "latitude")) %>% 
+          
+          # define projection
+          `proj4string<-` (projection)
+        
+        # output result
+        Tag
+      }
+      else{
+        # read data file and extract data
+        Tag <- 
+          read.table(sep = "", na.strings = "", file = data_loc, fill = TRUE,
+                     stringsAsFactors = FALSE, header = TRUE) %>% 
+          
+          # remove first observation (calibration fix)
+          slice(-(n_slice/n_slice):(n_slice * -1)) %>%
+          
+          mutate(
+            # extract the temporal information from the string
+            year = paste0("20", str_sub(string = RTC.date, start = 1, end = 2)),
+            month = paste0(str_sub(string = RTC.date, start = 4, end = 5)),
+            day = paste0(str_sub(string = RTC.date, start = 7, end = 8)),
+            hour = paste0(str_sub(string = RTC.time, start = 1, end = 2)),
+            minute = paste0(str_sub(string = RTC.time, start = 4, end = 5)),
+            second = paste0(str_sub(string = RTC.time, start = 7, end = 8))
+          ) %>% 
+          
+          mutate(
+            # Merge the time and date columns together to formulate the time stamp for a given row
+            timestamp = ISOdate(year = year, month = month, day = day, 
+                                hour = hour, min = minute, sec = second, 
+                                tz = time_zone),
+            
+            # Tag$datetime[nrow(Tag)] = Tag$datetime[nrow(Tag)] + 8 * 60 * 60,
+            # 
+            # Tag$hour[nrow(Tag)] = as.character(as.numeric(Tag$hour[nrow(Tag)]) + 8),
+            # 
+            # timestamp = paste0(year, "-", month, "-", day, " ", hour, ":", minute, ":", second)
+            
+            timestamp_simple = as.Date(str_sub(as.character(timestamp), 
+                                               start = 1, end = 10), 
+                                       format = "%Y-%m-%d"),          
+            # make a fix number column
+            fix_number = str_pad(row.names(.), 2, pad = "0"),
+            
+            # assign name of tag
+            tag_ID = tag_ID
+          ) %>% 
+          
+          # remove observations without a reliable location
+          dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
+                        Sats, Latitude, Longitude, Altitude.m.) %>% 
+          
+          `colnames<-` (tolower(names(.))) %>% 
+          
+          rename(satellites = sats,
+                 tag_ID = tag_id,
+                 elevation = altitude.m.) %>% 
+          
+          mutate(battery = NA,
+            # assign bird ring
+            ring = bird_ID,
+            
+            # assign sex of bird
+            sex = bird_sex, 
+            
+            # assign bird color combo
+            code = bird_code,
+            
+            # assign bird species
+            species = species,
+            
+            # assign bird population
+            population = population,
+            
+            satellites = as.character(satellites)) %>% 
+          
+          # remove observations without a reliable location
+          filter(latitude != 0 | !is.na(latitude)) %>% 
+          
+          # make the dataframe a SpatialPointsDataFrame and define coordinates
+          `coordinates<-` (c("longitude", "latitude")) %>% 
+          
+          # define projection
+          `proj4string<-` (projection)
+        
+        # output result
+        Tag
+      }
+    }
+    
+    else{
+      print("Unknown tag_model. Options are 'PinPoint-10' or 'nanoFix-mini'.")
+    }
+  }
+```
+
+### wrangle GPS data
+```{r}
+library(sp)
+NFTag55843_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55843/Obs161122_192740_Tag55843.pos",
+                                tag_ID = "NF55843", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9042", bird_code = "FWX.RR|MX.YY", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+NFTag20865_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag20865/Obs261022_231825_Tag20865.pos",
+                                tag_ID = "NF20865", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9055", bird_code = "FWX.RR|MX.LR", bird_sex = "M", species = "BADO", population = "kaikoura")
+
+NFTag21146_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag21146/Obs261022_234604_Tag21146.pos",
+                                tag_ID = "NF21146", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9098", bird_code = "XX.RW|MX.LB", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+NFTag55687_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55687/Obs261022_232953_Tag55687.pos",
+                                tag_ID = "NF55687", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9032", bird_code = "XX.RB|MX.BR", bird_sex = "M", species = "BADO", population = "kaikoura")
+
+NFTag55660_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55660/Obs031222_180904_Tag55660.pos",
+                                tag_ID = "NF55660", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9066", bird_code = "XX.RB|MX.BY", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+NFTag55795_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55795/Obs261022_233831_Tag55795.pos",
+                                tag_ID = "NF55795", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9096", bird_code = "XX.RW|MX.BY", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+pre_2024_gps_data <- 
+  bind_rows(as.data.frame(NFTag55843_nz),
+            as.data.frame(NFTag20865_nz), as.data.frame(NFTag21146_nz),
+            as.data.frame(NFTag55687_nz), as.data.frame(NFTag55660_nz),
+            as.data.frame(NFTag55795_nz))  %>% 
+  mutate(date_local = as.POSIXct(with_tz(ymd_hms(timestamp, tz = 'UTC'), 'Pacific/Auckland')),
+         site = "KK") %>% 
+  mutate(parent = sapply(.$code, extract_and_merge)) %>% 
+  dplyr::select(-c(timestamp, timestamp_simple, fix_number, satellites, elevation, species, population, code)) %>% 
+  rename(volt = battery,
+         tagID = tag_ID,
+         field_sex = sex) 
+
+pre_2024_gps_data_ <- 
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
+             sheet = "Captures", col_types = "c") %>% 
+  dplyr::filter(age == "A" & site == "KK") %>% 
+  filter(species == "BADO") %>% 
+  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
+                      ifelse(tag == "66891" & year == "2022", "66891_2", 
+                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
+         date = ifelse(code == "XX.RW|MX.LG", "2610",
+                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
+         year = ifelse(code == "XX.RW|MX.LG", "2022",
+                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
+  filter(!is.na(date)) %>% 
+  mutate(date = paste(year, ifelse(nchar(date) == 3,
+                                   substring(date, first = 2, last = 3),
+                                   substring(date, first = 3, last = 4)),
+                      ifelse(nchar(date) == 3,
+                             substring(date, first = 1, last = 1),
+                             substring(date, first = 1, last = 2)),
+                      sep = "-") %>% ymd()) %>% 
+  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
+  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>% 
+  # mutate(date_dep = ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland')) %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>%
+  dplyr::select(ring, site, code, tag, field_sex, date_dep) %>% 
+  filter(!is.na(tag) & nchar(tag) > 1) %>% 
+  group_by(ring) %>% 
+  arrange(date_dep) %>% 
+  slice(1) %>% 
+  left_join(pre_2024_gps_data %>% dplyr::select(-c(site, field_sex)), ., by = "ring") %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  dplyr::select(-c(code, tag))
+
+```
+
+### wrangle 2024 PTT data
+```{r}
+# establish a connection to the entire database (i.e., that I have access to)
+con = dbcon()
+# connect to the FIELD_2024_BADOatNZ local database
+dbExecute(con, "USE FIELD_2024_BADOatNZ")
+caps_2024 <-
+  dbq(con, "SELECT * FROM CAPTURES") %>% 
+  rowwise() %>% 
+  mutate(time_cap = as.hms(max(cap_start, caught, released, na.rm = TRUE))) %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time_cap, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>% 
+  dplyr::select(ring, field_sex, site, date_dep, tag_id) %>% 
+  rename(tagID = tag_id)
+
+tag_data_2024 <-
+  bind_rows(read.csv("data/PTT/ArgosData_2024_12_19_19_41_20.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_40_37.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_39_43.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_38_57.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_38_33.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_37_26.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_36_30.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_35_42.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_34_57.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_33_16.csv", stringsAsFactors = FALSE)) %>% 
+  mutate(temp = (0.474 * SENSOR.01) - 35.662,
+         volt = (0.0079 * SENSOR.02) + 2.4129,
+         acc = SENSOR.04) %>% 
+  dplyr::select(Platform.ID.No., 
+                Loc..date, 
+                Loc..quality, 
+                Longitude, 
+                Latitude, 
+                # Semi.major.axis, 
+                # Semi.minor.axis, 
+                # Ellipse.orientation, 
+                temp, volt, acc) %>% 
+  rename(tagID = Platform.ID.No.,
+         date = Loc..date,
+         locationClass = Loc..quality,
+         longitude = Longitude,
+         latitude = Latitude#,
+         # smaj = Semi.major.axis,
+         # smin = Semi.minor.axis,
+         # eor = Ellipse.orientation
+         ) %>% 
+  mutate(date_ = as_datetime(date),
+         tagID = as.character(tagID)) %>% 
+  mutate(date_local = as.POSIXct(with_tz(ymd_hms(date, tz = 'UTC'), 'Pacific/Auckland'))) %>% 
+  left_join(., caps_2024, by = "tagID") %>% 
+         filter(date_local >= date_dep) %>% 
+         filter(!is.na(volt)) %>% 
+         # dplyr::select(-temp) %>% 
+         distinct() %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  filter(tagID != "266470") %>% 
+  dplyr::select(tagID, ring, field_sex, site, date_local, locationClass, longitude, latitude, volt, temp, time_since_deployment, date_dep) %>% 
+  dplyr::select(-c(locationClass))
+```
+
+### wrangle pre-2024 PTT data
+```{r}
+# wrangle KK PTT data
+tag_date_info <-
+  read_excel(here("data/tag_deploy_retrieve_dates.xlsx"), 
+                     col_types = "text") %>%
+  mutate(recapture_date = as.Date(as.POSIXct(as.numeric(recapture_date) * 86400, origin = "1899-12-30", tz = "UTC")),
+         last_argos_data = as.Date(as.POSIXct(as.numeric(last_argos_data) * 86400, origin = "1899-12-30", tz = "UTC")),
+         deployment_date = as.Date(as.POSIXct(as.numeric(deployment_date) * 86400, origin = "1899-12-30", tz = "UTC")))
+
+pre_2024_argos_data <-
+  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
+  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
+  mutate(temp = (0.474 * S1) - 35.662,
+         volt = (0.0079 * S2) + 2.4129) %>% 
+  mutate(date_local = with_tz(locationDate, 'Pacific/Auckland')) %>% 
+  distinct() %>% 
+  mutate(tagID = ifelse(tagID == "66891" & date_local <= as.POSIXct("2022-10-13 12:00:00", tz = 'Pacific/Auckland'), "66891_1",
+                        ifelse(tagID == "66891" & date_local > as.POSIXct("2022-10-13 12:00:00", tz = 'Pacific/Auckland'), "66891_2", tagID))) %>% 
+  dplyr::select(tagID, date_local, locationClass, latitude, longitude, temp, volt) %>% 
+  mutate(tagID = as.character(tagID))
+
+# BADO google sheets
+pre_2024_tag_data <-
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
+             sheet = "Captures", col_types = "c") %>% 
+  dplyr::filter(age == "A" & site == "KK") %>% 
+  filter(species == "BADO") %>% 
+  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
+                      ifelse(tag == "66891" & year == "2022", "66891_2", 
+                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
+         date = ifelse(code == "XX.RW|MX.LG", "2610",
+                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
+         year = ifelse(code == "XX.RW|MX.LG", "2022",
+                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
+  filter(!is.na(date)) %>% 
+  mutate(date = paste(year, ifelse(nchar(date) == 3,
+                                   substring(date, first = 2, last = 3),
+                                   substring(date, first = 3, last = 4)),
+                      ifelse(nchar(date) == 3,
+                             substring(date, first = 1, last = 1),
+                             substring(date, first = 1, last = 2)),
+                      sep = "-") %>% ymd()) %>% 
+  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
+  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>% 
+  # mutate(date_dep = ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland')) %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>%
+  dplyr::select(ring, site, code, tag, field_sex, date_dep) %>% 
+  filter(!is.na(tag) & nchar(tag) > 1) %>% 
+  mutate(parent = sapply(.$code, extract_and_merge)) %>% 
+  left_join(., tag_date_info, by = "parent") %>% 
+  filter(tag_type == "PTT") %>% 
+  rename(tagID = tag) %>% 
+  dplyr::select(ring, site, tagID, field_sex, date_dep, parent) %>% 
+  left_join(pre_2024_argos_data, ., by = "tagID") %>% 
+  filter(date_local >= date_dep) %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  dplyr::select(-c(locationClass))
+
+# bind_rows(pre_2024_gps_data, pre_2024_tag_data)
+
+
+# Need to check the following photos to see if RBWR has tag still ("tag seen missing in 30.08.23, assumed to have fallen off during winter (last seen with tag 26.07.2023)":
+# E:/Dotterel Observations/2023/October/2023_10_11 Dot ob CG WT/IMG_7311.JPG
+# E:/Dotterel Observations/2023/November/2023_11_01 Dot ob Sb ro Ph/IMG_9427.JPG
+# E:/Dotterel Observations/2023/November/2023_11_06 Afternoon dot ob CG to SBC/IMG_0174.JPG
+# E:/Dotterel Observations/2023/November/2023_11_06 Afternoon dot ob CG to SBC/IMG_0186.JPG
+# E:/Dotterel Observations/2023/November/2023_11_13 Dot ob CG to Ph/IMG_1111.JPG
+# E:/Dotterel Observations/2023/December/2023_12_23 Dot ob/IMG_7447.JPG
+# E:/Dotterel Observations/2023/December/2023_12_28 Dob ob/IMG_7770.JPG
+# E:/Dotterel Observations/2024/January/2024_01_05 Dot Check SSB to Clealls/IMG_9780.JPG
+# E:/Dotterel Observations/2024/January/2024_01_06 Dot check Clealls to SSB/IMG_9794.JPG
+# E:/Dotterel Observations/2024/January/2024_01_21 Dot ob with Ben/IMG_4124.JPG
+# E:/Dotterel Observations/2024/January/2024_01_21 Dot ob with Ben/IMG_4212.JPG
+# E:/Dotterel Observations/2024/February/2024_02_12 Dot ob SB/IMG_6589.JPG
+# E:/Dotterel Observations/2024/February/2024_02_12 Dot ob SB/IMG_6619.JPG
+
+# Need to check the following photos to see if RBOG has tag still ("tag likely fell off on 23.11.22 - a day after release"):
+# E:/Dotterel Observations/2022/November/2022_11_15 Dot nest NPG/IMG_0011.JPG
+# E:/Dotterel Observations/2023/January/2023_01_17 Dot ob/IMG_6505.JPG
+# E:/Dotterel Observations/2023/January/2023_01_17 Dot ob/IMG_7118.JPG
+# E:/Dotterel Observations/2023/March/2023_03_17 Dot JA arrival back of RRGO/IMG_0007.JPG
+# E:/Dotterel Observations/2023/March/2023_03_17 Dot JA arrival back of RRGO/IMG_0198.JPG
+# E:/Dotterel Observations/2023/March/2023_03_31 Dot ob Point to JA/IMG_0192.JPG
+```
+
+### bind all tag data together
+```{r}
+str(tag_data_2024)
+str(pre_2024_gps_data_)
+str(pre_2024_tag_data)
+
+names(tag_data_2024) %>% sort()
+names(pre_2024_gps_data_) %>% sort()
+names(pre_2024_tag_data) %>% sort()
+
+all_BADO_tagging_data <- 
+  bind_rows(pre_2024_gps_data_ %>% mutate(tag_type = "GPS"), 
+            tag_data_2024 %>% mutate(tag_type = "PTT"), 
+            pre_2024_tag_data %>% mutate(tag_type = "PTT")) %>% 
+  dplyr::select(ring, parent, site, field_sex, tagID, tag_type, date_dep, 
+                date_local, temp, volt, latitude, longitude, 
+                time_since_deployment)
+```
+
+### plot of tag data collected over time
+```{r}
+all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  group_by(parent, tag_type) %>% 
+  summarise(min_time = duration(0),
+            max_time = max(time_since_deployment, na.rm = TRUE)) %>%
+  # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>% 
+  mutate(parent = factor(parent, levels = c("RWLB", "RRYY", "RRLR", "RBBR", "RWBY", "RBBY", "RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))) %>% 
+  pivot_longer(
+    cols = c(min_time, max_time),
+    names_to = "time_type",
+    values_to = "time") %>% 
+  mutate(time_days = time/86400) %>% 
+  ggplot() +
+  geom_line(aes(y = parent, x = time_days, color = tag_type))
+
+custom_fill_ <- brewer.pal(9, "Pastel1")[c(2, 3)]
+
+tag_type_facets <- c('GPS' = "1.3g archival GPS tag", 
+                     'PTT' = "1.8g Argos PTT tag")
+
+facets <- 
+  data.frame(parent = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))),
+             label = c("tag retrieved but no data onboard", "tag retrieved but no data onboard", "bird did not return", "bird did not return", rep(NA, 16)),
+             tag_type = c(rep("GPS", 10), rep("PTT", 10))) %>% 
+  mutate(parent = factor(parent,
+                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG")))))
+
+tag_data_plot <- 
+  all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
+  mutate(parent = factor(parent,
+                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))) %>%
+  mutate(time_days = time_since_deployment/86400) %>% 
+  ggplot() +
+  geom_jitter(aes(y = parent, x = time_days, fill = tag_type), shape = 21, alpha = 0.5, height = 0.1, size = 3, color = "grey30") +
+  theme_minimal() +
+  # geom_point(data = tag_date_info %>% 
+  #              mutate(diff = recapture_date - deployment_date,
+  #                     parent = factor(parent,
+  #                        levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))
+  #                     ),
+  #            aes(x = diff, y = parent)) +
+  geom_text(data = facets, aes(x = 0, y = parent, label = label), hjust = 0, size = 3, fontface = "italic") +
+  facet_wrap("tag_type", scales = "free_y", labeller = as_labeller(tag_type_facets)) +
+  scale_fill_manual(values = custom_fill_) +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 12)) +
+  ylab("bird identity") +
+  xlab("days since tag deployment")
+  # scale_color_manual(values = custom_fill_)
+
+
+  
+```
+
+```{r}
+all_BADO_tagging_data_sf <- 
+  all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+all_BADO_tagging_data_sf %>% 
+          filter(parent == "RBWR") %>% 
+          mutate(time_days = time_since_deployment/86400) %>% 
+          filter(time_days > 200) %>% 
+mapview(., zcol = "tagID")
+```
+
+
+
+```{r}
+KK_caps %>% 
+  filter(date_local > recapture_date)
+
+
+
+
+BADO_PTTs_all <-
+  BADO_PTTs %>% 
+  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+  st_drop_geometry() %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, "00:00:00", sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>% 
+  mutate(date_local = as.POSIXct(with_tz(ymd_hms(locationDate, tz = 'UTC'), 'Pacific/Auckland')),
+         site = "KK") %>%
+  rename(id = tagID,
+         lc = locationClass,
+         field_sex = sex) %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  dplyr::select(id, ring, field_sex, site, date_local, lc, lon, lat, volt, temp, time_since_deployment) %>% arrange(desc(date_local))
+  bind_rows(., argos_data)
+
+ggplot(data = BADO_PTTs_all) +
+  geom_line(aes(x = time_since_deployment, y = volt, group = id), alpha = 0.5) +
+  facet_wrap("site", nrow = 2)
+
+voltage_lmer <- 
+  lmer(scale(volt) ~ scale(time_since_deployment) + (1|id) + (1|site), data = argos_data)
+
+tidy_voltage_lmer <-
+  tidy(voltage_lmer, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+summary(voltage_lm)
+tidy
+plot(allEffects(voltage_lm))
+```
+
+
+
+```{r}
+
+### import and wrangle ----
+# 2024 data 
+# establish a connection to the entire database (i.e., that I have access to)
+con = dbcon()
+
+# connect to the FIELD_2024_BADOatNZ local database
+dbExecute(con, "USE FIELD_2024_BADOatNZ")
+
+# query to select everything from the "incoming" table
+# caps_2024 <-
+  dbq(con, "SELECT * FROM CAPTURES") %>% 
+    filter(nchar(tag_id) == 6) %>% arrange(tag_id) %>% pull(tag_id) %>% unique() %>% .[1:10] %>% paste(., collapse = ", ")
+  filter(age != "J") %>% 
+  rowwise() %>%
+  mutate(time = as_hms(min(cap_start, caught, released, na.rm = TRUE))) %>% 
+    mutate(UL = ifelse(is.na(UL) | UL == "" | UL == "X", "XX", UL),
+           LL = ifelse(is.na(LL) | LL == "" | LL == "X", "XX", LL),
+           UR = ifelse(is.na(UR) | UR == "" | UR == "X", "XX", UR),
+           LR = ifelse(is.na(LR) | LR == "" | LR == "X", "XX", LR)) %>% 
+    mutate(UL = ifelse(UL == "M", "MX", UL),
+           UR = ifelse(UR == "M", "MX", UR)) %>% 
+  mutate(code = paste0(UL,".", LL, "|", UR,".", LR)) %>% 
+  mutate(code = str_remove_all(code, ",")) %>% 
+  dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, total_head, wing, wt_w_tag, tag_action, tag_id) %>%
+  # remove pre-nesting females (weights are confounded by oogenisis)
+  filter(ring != "CP19336" & weight != 66.6) %>% 
+  filter(ring != "CP9088" & weight != 75.2) %>% 
+  filter(ring != "CP16483" & weight != 63.8)# %>% 
+  # filter(ring == "CP16134")
+
 # scidb
 con <- dbo::dbcon(server = "scidb_replica")
 
@@ -2122,9 +2765,9 @@ sfc_as_cols <- function(x, geometry, names = c("x","y")) {
 # classify PTT color combos
 PTTs <- 
   c("XX.RB|MX.RL", "XX.RR|MX.RG", "XX.RR|MX.GO", "XX.RR|MX.OW", "XX.RB|MX.WO",
-    "XX.RB|MX.WR", "XX.RB|MX.OG", "XX.RB|MX.GB", "XX.RW|MX.LG", "XX.RB|MX.OY",
-    "MX.YY|XX.BO", "MX.YY|XX.BY", "MX.YY|XX.BW", "MX.YY|XX.BR", "MX.YW|XX.GW", 
-    "MX.YW|XX.BY", "MX.YW|XX.RG")
+    "XX.RB|MX.WR", "XX.RB|MX.OG", "XX.RB|MX.GB", "XX.RW|MX.LG", "XX.RB|MX.OY")#,
+    # "MX.YY|XX.BO", "MX.YY|XX.BY", "MX.YY|XX.BW", "MX.YY|XX.BR", "MX.YW|XX.GW", 
+    # "MX.YW|XX.BY", "MX.YW|XX.RG")
 
 # wrangle coordinate system of cap and resight data
 BADO_resights <-
@@ -2149,7 +2792,7 @@ BADO_resights <-
                               str_sub(date, start = 1, end = 1), 
                               str_sub(date, start = 1, end = 2)), 
                        sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
-  left_join(., BADO_caps_raw %>% filter(sex != "J") %>% filter(!is.na(easting)) %>% dplyr::select(code, tag),
+  left_join(., BADO_caps_raw %>% filter(sex != "J") %>% filter(!is.na(easting)) %>% dplyr::select(ring, code, tag),
             by = "code") %>%
   mutate(source = "resight") %>% 
   st_as_sf(., 
@@ -2159,7 +2802,7 @@ BADO_resights <-
   mutate(tag = ifelse(tag == "66891" & year == "2021", "66891_1",
                       ifelse(tag == "66891" & year == "2022", "66891_2", tag))) %>% 
   rename(tagID = tag) %>% 
-  dplyr::select(source, code, sex, date, tagID, status)
+  dplyr::select(source, ring, code, sex, date, tagID, status)
 
 BADO_caps <-
   BADO_caps_raw %>% 
@@ -2194,7 +2837,7 @@ BADO_caps <-
                       sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
   rename(tagID = tag) %>% 
   mutate(source = "capture") %>% 
-  dplyr::select(source, code, tagID, sex, date, longitude, latitude) %>% 
+  dplyr::select(source, ring, code, tagID, sex, date, longitude, latitude) %>% 
   st_as_sf(., 
            coords = c("longitude", "latitude"),
            crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
@@ -2214,12 +2857,12 @@ BADO_PTTs <-
   st_as_sf(., 
            coords = c("longitude", "latitude"),
            crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>%
-  # sfc_as_cols(., names = c("lon", "lat")) %>% 
-  filter(locationClass %in% c(1, 2, 3)) %>% 
+  sfc_as_cols(., names = c("lon", "lat")) %>%
+  # filter(locationClass %in% c(1, 2, 3)) %>% 
   filter(year(locationDate) > 2020) %>%
   mutate(tagID = ifelse(tagID == "66891" & locationDate < as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_1",
                       ifelse(tagID == "66891" & locationDate >= as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_2", tagID))) %>%  
-  left_join(., BADO_caps %>% st_drop_geometry() %>% dplyr::select(code, tagID, date, sex), by = "tagID") %>% #filter(tagID == "234673")
+  left_join(., BADO_caps %>% st_drop_geometry() %>% dplyr::select(ring, code, tagID, date, sex), by = "tagID") %>% #filter(tagID == "234673")
   rename(cap_date = date,) %>% 
   filter(locationDate >= cap_date) %>% 
   mutate(date = as.Date(locationDate),
@@ -2228,7 +2871,9 @@ BADO_PTTs <-
 
 BADO_PTTs %>% 
   pull(tagID) %>% 
-  unique()
+  unique() %>% 
+  sort() %>% 
+  paste(., collapse = ", ")
 
 sf_points = BADO_PTTs %>% filter(tagID == "234658")
 
