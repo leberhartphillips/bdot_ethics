@@ -2603,15 +2603,41 @@ facets <-
   mutate(parent = factor(parent,
                          levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG")))))
 
-tag_data_plot <- 
+# Define the bin size
+bin_width <- 28
+
+# Bin the data
+binned_data <- 
   all_BADO_tagging_data %>% 
   filter(site == "KK") %>% 
   mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
   mutate(parent = factor(parent,
                          levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))) %>%
-  mutate(time_days = time_since_deployment/86400) %>% 
-  ggplot() +
-  geom_jitter(aes(y = parent, x = time_days, fill = tag_type), shape = 21, alpha = 0.5, height = 0.1, size = 3, color = "grey30") +
+  mutate(time_days = as.numeric(time_since_deployment/86400)) %>%
+  mutate(
+    x_bin = cut(time_days, breaks = seq(floor(min(time_days)), ceiling(max(time_days)), by = bin_width))) %>%
+  group_by(parent, x_bin) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  mutate(
+    x_bin_center = as.numeric(sub("\\((.+),.*", "\\1", x_bin)) + bin_width / 2
+  ) %>% 
+  left_join(., tag_date_info %>% dplyr::select(parent, tag_type), by = "parent") %>% 
+  distinct()
+
+# tag_data_plot <- 
+  # all_BADO_tagging_data %>% 
+  # filter(site == "KK") %>% 
+    binned_data %>% 
+  # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
+  mutate(parent = factor(parent,
+                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))) %>%
+  # mutate(time_days = time_since_deployment/86400) %>% 
+  ggplot(aes(x = x_bin_center, y = parent)) +
+  geom_point(aes(size = count, fill = tag_type), shape = 21, alpha = 1) +
+  scale_size_continuous(range = c(1, 10), 
+                        breaks = c(1, 10, 100, 500), 
+                        labels = c("1", "10", "100", "500")) +
+  # geom_jitter(aes(y = parent, x = time_days, fill = tag_type), shape = 21, alpha = 0.5, height = 0.1, size = 3, color = "grey30") +
   theme_minimal() +
   # geom_point(data = tag_date_info %>% 
   #              mutate(diff = recapture_date - deployment_date,
@@ -2620,12 +2646,13 @@ tag_data_plot <-
   #                     ),
   #            aes(x = diff, y = parent)) +
   geom_text(data = facets, aes(x = 0, y = parent, label = label), hjust = 0, size = 3, fontface = "italic") +
-  facet_wrap("tag_type", scales = "free_y", labeller = as_labeller(tag_type_facets)) +
+  facet_wrap(ncol = 1, "tag_type", scales = "free_y", labeller = as_labeller(tag_type_facets)) +
   scale_fill_manual(values = custom_fill_) +
-  theme(legend.position = "none",
+  theme(legend.position = c(0.9, 0.8),
         strip.text = element_text(size = 12)) +
   ylab("bird identity") +
-  xlab("days since tag deployment")
+  xlab("days since tag deployment") +
+  guides(fill = "none", size = guide_legend(override.aes = list(color = "black", fill = "grey90")))
   # scale_color_manual(values = custom_fill_)
 
 
