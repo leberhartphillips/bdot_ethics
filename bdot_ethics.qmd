@@ -8,7 +8,13 @@ author:
    url: https://www.bi.mpg.de/person/115852/2867
    affiliations:
      - ref: bk
- - name: Ailsa Howard
+ - name: Emma Williams
+   affiliations:
+     - ref: ew
+ - name: Ailsa McGilvary-Howard
+   affiliations:
+     - ref: ah
+ - name: Ted Howard
    affiliations:
      - ref: ah
  - name: Tony Habraken
@@ -20,28 +26,25 @@ author:
  - name: Clemens Küpper
    affiliations:
      - ref: ck
- - name: Emma Williams
-   affiliations:
-     - ref: ew
  - name: Bart Kempenaers
    affiliations:
      - ref: bk
 affiliations:
  - id: bk
    number: 1
-   name: Department of Ornithology, Max Planck Institute for Biological Intelligence, Seewiesen, Germany
+   name: Department of Ornithology, Max Planck Institute for Biological Intelligence, Eberhard-Gwinner Straße 7, 82319 Seewiesen, Germany
  - id: ah
    number: 2
-   name: South Bay Banded Dotterel Project, Kaikoura, New Zealand
+   name: Kaikōura Banded Dotterel Project, 1 Maui Street, Kaikōura, New Zealand
  - id: th
    number: 2
    name: Port Waikato Banded Dotterel Project, Port Waikato, New Zealand
  - id: ew
    number: 3
-   name: Department of Conservation, Christchurch, New Zealand
-    - id: bk
+   name: Fauna Science Team, Department of Conservation Christchurch Office, Christchurch Mail Centre, Private Bag 4715, Christchurch, 8140, New Zealand
+ - id: ck
    number: 1
-   name: Research Group for Behavioural Genetics and Evolutionary Ecology, Max Planck Institute for Biological Intelligence, Seewiesen, Germany
+   name: Behavioural Genetics and Evolutionary Ecology, Max Planck Institute for Biological Intelligence, Eberhard-Gwinner Straße 5, 82319 Seewiesen, Germany
 format: 
   html:
     toc: true
@@ -60,22 +63,23 @@ editor_options:
 knitr::opts_chunk$set(cache = TRUE)
 ```
 
-```{r, message=FALSE, results='hide', warning=FALSE, results='hide', cache=FALSE, include=FALSE}
 ## Prerequisites
-
 ### R packages
-
+```{r, message=FALSE, results='hide', warning=FALSE, cache=FALSE, include=FALSE}
 # -   The following packages are needed for analysis and can be easily installed from [CRAN](http://cran.r-project.org/) or GitHub by running the following code chunk:
 
+# Set a CRAN mirror before installing packages
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
 # a vector of all the packages needed in the project
-packages_required_in_project <- c("dbo", "data.table", "apis", "stringr", "glue", 
-                                  "mapview", "sf", "DBI", "tidyverse", "hms", 
-                                  "stringr", "remotes", "googlesheets4", 
-                                  "corrplot", "smatr", "lme4", "broom.mixed", 
-                                  "gtsummary", "RColorBrewer", "rptR", "partR2",
-                                  "multcomp", "effects", "gt", "scales", "readxl", 
-                                  "colorspace", "showtext", "MuMIn", "here", "nnet",
-                                  "brms", "ggeffects", "RMark", "tidybayes")
+packages_required_in_project <-
+  c("apis", "BaSTA", "brms", "broom.mixed", "colorspace", "corrplot", "data.table", 
+    "DBI", "dbo", "effects", "elevatr", "geosphere", "ggblend", "ggeffects", "ggmap",
+    "ggnewscale", "ggsn", "giscoR", "glue", "googlesheets4", "gt", "gtsummary", 
+    "here", "hms", "lme4", "lubridate", "mapview", "mgcv", "multcomp", "MuMIn", "nnet", 
+    "partR2", "patchwork", "RColorBrewer", "readxl", "remotes", "RMark", "rnaturalearth", 
+    "rptR", "scales", "sf", "showtext", "smatr", "sp", "stringr", "tidybayes", 
+    "tidyterra", "tidyverse")
 
 # of the required packages, check if some need to be installed
 new.packages <- 
@@ -94,6 +98,11 @@ lapply(packages_required_in_project, require, character.only = TRUE)
 # set the home directory to where the project is locally based (i.e., to find 
 # the relevant datasets to import, etc.
 here::set_here()
+
+# Use gs4_auth() to log in and authenticate with your Google account. 
+# You can specify your email address to ensure the correct account is used. 
+# Once authenticated, you won't need to select the account interactively when using read_sheet()
+gs4_auth(email = "luke.eberhart@gmail.com")
 ```
 
 ```{r, message=FALSE, results='hide', warning=FALSE, include=FALSE}
@@ -124,11 +133,342 @@ luke_theme <-
     strip.text = element_text(size = 10),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    axis.ticks = element_line(linewidth = 0.5, colour = "grey40"),
+    axis.ticks = element_line(linewidth = 0.3, colour = "grey40"),
     axis.ticks.length = unit(0.2, "cm"),
     panel.border = element_rect(linetype = "solid", colour = "grey"),
     legend.position.inside = c(0.1, 0.9)
   )
+```
+
+### Custom functions
+```{r}
+# function that does the opposite of "%in%"
+`%!in%` = Negate(`%in%`)
+
+# scaled mass index calculation
+scaledMassIndex <-
+  function(x, y, x.0 = mean(x)) {
+    require(smatr)
+    require(magrittr)
+    require(MASS)
+    require(data.table)
+    logM.ols <- lm(log(y) ~ log(x))
+    logM.rob <- rlm(log(y) ~ log(x), method = "M")
+    b.msa.ols <- coef(sma(log(y) ~ log(x)))[2]
+    b.msa.rob <- coef(sma(log(y) ~ log(x), robust = T))[2]
+    SMI.ols <- y * (x.0 / x) ^ b.msa.ols
+    SMI.rob <- y * (x.0 / x) ^ b.msa.rob
+    res <- data.frame(SMI.ols, SMI.rob, x, y)
+    pred.DT <-
+      data.table(x = seq(min(x), max(x), length = 100)) %>%
+      .[, y.ols := predict(logM.ols, newdata = .) %>% exp] %>%
+      .[, y.rob := predict(logM.rob, newdata = .) %>% exp]
+    attr(res, "b.msa") <- c(ols = b.msa.ols, rob = b.msa.rob)
+    return(res)
+  }
+
+# Function to extract the required characters
+extract_and_merge <- function(text) {
+  # Extract part before and after "|"
+  parts <- str_split(text, "\\|", simplify = TRUE)
+  part1 <- parts[1]
+  part2 <- parts[2]
+  
+  # Extract the two characters to the left of the "|"
+  left_chars <- str_sub(part1, -2, -1)
+  
+  # Extract the last two characters
+  right_chars <- str_sub(part2, -2, -1)
+  
+  # Merge these four characters together
+  paste0(left_chars, right_chars)
+}
+
+# Define a function to extract the desired patterns and ensure enough columns
+extract_patterns <- function(text) {
+  # Replace vertical bar '|' with an empty string
+  text <- gsub("\\|", "", text)
+  
+  # Extract all 4 or 5-character long texts that start with R or r
+  matches_r <- str_extract_all(text, "\\b[Rr]\\w{3,4}\\b")[[1]]
+  
+  # Extract UB, UN, UBF, UBM as standalone patterns
+  matches_ub_un <- str_extract_all(text, "\\b[Uu][BbNnFfMm]\\b")[[1]]
+  
+  # Combine matches
+  matches <- c(matches_r, matches_ub_un)
+  
+  # Ensure all matches are capitalized
+  matches <- toupper(matches)
+  
+  # Ensure there are exactly two columns, filling with NA if necessary
+  result <- c(matches, rep(NA, 2 - length(matches)))
+  
+  # Return the result as a named vector
+  return(setNames(result, c("parent1", "parent2")))
+}
+
+# function to read tagging data
+import_plover_tag_spatial_fun <- 
+  function(data_loc, tag_ID, projection,
+           time_zone = "America/Mazatlan",
+           tag_model, bird_ID, bird_sex, bird_code, 
+           species, population, n_slice){
+    
+    if(tag_model == "nanoFix-mini")
+    {
+      # read data file and extract data
+      Tag <- 
+        read.table(sep = ",", skip = 5, file = data_loc) %>% 
+        
+        # assign column names
+        `colnames<-` (c("day", "month", "year", "hour", "minute", "second", "unknown_col", 
+                        "satellites", "latitude", "longitude", "elevation", 
+                        "clock_offset", "accuracy_indicator", "battery")) %>% 
+        
+        mutate(
+          # make a fix number column
+          fix_number = str_pad(row.names(.), 2, pad = "0"),
+          
+          # make a timestamp column
+          timestamp = paste(paste(year, month, 
+                                  day, sep = "-"), 
+                            paste(hour, minute, 
+                                  second, sep = ":"), sep = " ")) %>% 
+        mutate(
+          # convert to a useable POSIX time/date string
+          timestamp = as.POSIXct(strptime(as.character(timestamp), 
+                                          format = "%y-%m-%d %H:%M:%S"), 
+                                 tz = time_zone),
+          
+          # assign name of tag
+          tag_ID = tag_ID,
+          
+          # make a simplified version of the time sting
+          timestamp_simple = as.Date(str_sub(as.character(timestamp), 
+                                             start = 1, end = 10), 
+                                     format = "%Y-%m-%d")) %>% 
+        
+        # remove observations without a reliable location
+        dplyr::filter(latitude != 0 & !is.na(latitude)) %>%
+        
+        # remove observations without a reliable location
+        dplyr::filter(timestamp != 0 & !is.na(timestamp)) %>%
+        
+        # names() %>% 
+        # as.data.frame()
+        
+        dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
+                      satellites, latitude, longitude, elevation, battery) %>% 
+        
+        mutate(# assign bird ring
+          ring = bird_ID,
+          
+          # assign sex of bird
+          sex = bird_sex, 
+          
+          # assign bird color combo
+          code = bird_code,
+          
+          # assign bird species
+          species = species,
+          
+          # assign bird population
+          population = population,
+          
+          satellites = as.character(satellites)) %>% 
+        
+        # make the dataframe a SpatialPointsDataFrame and define coordinates
+        `coordinates<-` (c("longitude", "latitude")) %>% 
+        
+        # define projection
+        `proj4string<-` (projection)
+      
+      # output result
+      Tag
+    }
+    else if(tag_model == "PinPoint-10"){
+      if(n_slice == 0){
+        # read data file and extract data
+        Tag <- 
+          read.table(sep = "", na.strings = "", file = data_loc, fill = TRUE,
+                     stringsAsFactors = FALSE, header = TRUE) %>% 
+          
+          mutate(
+            # extract the temporal information from the string
+            year = paste0("20", str_sub(string = RTC.date, start = 1, end = 2)),
+            month = paste0(str_sub(string = RTC.date, start = 4, end = 5)),
+            day = paste0(str_sub(string = RTC.date, start = 7, end = 8)),
+            hour = paste0(str_sub(string = RTC.time, start = 1, end = 2)),
+            minute = paste0(str_sub(string = RTC.time, start = 4, end = 5)),
+            second = paste0(str_sub(string = RTC.time, start = 7, end = 8))
+          ) %>% 
+          
+          mutate(
+            # Merge the time and date columns together to formulate the time stamp for a given row
+            timestamp = ISOdate(year = year, month = month, day = day, 
+                                hour = hour, min = minute, sec = second, 
+                                tz = time_zone),
+            
+            # Tag$datetime[nrow(Tag)] = Tag$datetime[nrow(Tag)] + 8 * 60 * 60,
+            # 
+            # Tag$hour[nrow(Tag)] = as.character(as.numeric(Tag$hour[nrow(Tag)]) + 8),
+            # 
+            # timestamp = paste0(year, "-", month, "-", day, " ", hour, ":", minute, ":", second)
+            
+            timestamp_simple = as.Date(str_sub(as.character(timestamp), 
+                                               start = 1, end = 10), 
+                                       format = "%Y-%m-%d"),          
+            # make a fix number column
+            fix_number = str_pad(row.names(.), 2, pad = "0"),
+            
+            # assign name of tag
+            tag_ID = tag_ID
+          ) %>% 
+          
+          # remove observations without a reliable location
+          dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
+                        Sats, Latitude, Longitude, Altitude.m.) %>% 
+          
+          `colnames<-` (tolower(names(.))) %>% 
+          
+          rename(satellites = sats,
+                 tag_ID = tag_id,
+                 elevation = altitude.m.) %>% 
+          
+          mutate(battery = NA,
+            # assign bird ring
+            ring = bird_ID,
+            
+            # assign sex of bird
+            sex = bird_sex, 
+            
+            # assign bird color combo
+            code = bird_code,
+            
+            # assign bird species
+            species = species,
+            
+            # assign bird population
+            population = population,
+            
+            satellites = as.character(satellites)) %>% 
+          
+          # remove observations without a reliable location
+          filter(latitude != 0 | !is.na(latitude)) %>% 
+          
+          # make the dataframe a SpatialPointsDataFrame and define coordinates
+          `coordinates<-` (c("longitude", "latitude")) %>% 
+          
+          # define projection
+          `proj4string<-` (projection)
+        
+        # output result
+        Tag
+      }
+      else{
+        # read data file and extract data
+        Tag <- 
+          read.table(sep = "", na.strings = "", file = data_loc, fill = TRUE,
+                     stringsAsFactors = FALSE, header = TRUE) %>% 
+          
+          # remove first observation (calibration fix)
+          slice(-(n_slice/n_slice):(n_slice * -1)) %>%
+          
+          mutate(
+            # extract the temporal information from the string
+            year = paste0("20", str_sub(string = RTC.date, start = 1, end = 2)),
+            month = paste0(str_sub(string = RTC.date, start = 4, end = 5)),
+            day = paste0(str_sub(string = RTC.date, start = 7, end = 8)),
+            hour = paste0(str_sub(string = RTC.time, start = 1, end = 2)),
+            minute = paste0(str_sub(string = RTC.time, start = 4, end = 5)),
+            second = paste0(str_sub(string = RTC.time, start = 7, end = 8))
+          ) %>% 
+          
+          mutate(
+            # Merge the time and date columns together to formulate the time stamp for a given row
+            timestamp = ISOdate(year = year, month = month, day = day, 
+                                hour = hour, min = minute, sec = second, 
+                                tz = time_zone),
+            
+            # Tag$datetime[nrow(Tag)] = Tag$datetime[nrow(Tag)] + 8 * 60 * 60,
+            # 
+            # Tag$hour[nrow(Tag)] = as.character(as.numeric(Tag$hour[nrow(Tag)]) + 8),
+            # 
+            # timestamp = paste0(year, "-", month, "-", day, " ", hour, ":", minute, ":", second)
+            
+            timestamp_simple = as.Date(str_sub(as.character(timestamp), 
+                                               start = 1, end = 10), 
+                                       format = "%Y-%m-%d"),          
+            # make a fix number column
+            fix_number = str_pad(row.names(.), 2, pad = "0"),
+            
+            # assign name of tag
+            tag_ID = tag_ID
+          ) %>% 
+          
+          # remove observations without a reliable location
+          dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
+                        Sats, Latitude, Longitude, Altitude.m.) %>% 
+          
+          `colnames<-` (tolower(names(.))) %>% 
+          
+          rename(satellites = sats,
+                 tag_ID = tag_id,
+                 elevation = altitude.m.) %>% 
+          
+          mutate(battery = NA,
+            # assign bird ring
+            ring = bird_ID,
+            
+            # assign sex of bird
+            sex = bird_sex, 
+            
+            # assign bird color combo
+            code = bird_code,
+            
+            # assign bird species
+            species = species,
+            
+            # assign bird population
+            population = population,
+            
+            satellites = as.character(satellites)) %>% 
+          
+          # remove observations without a reliable location
+          filter(latitude != 0 | !is.na(latitude)) %>% 
+          
+          # make the dataframe a SpatialPointsDataFrame and define coordinates
+          `coordinates<-` (c("longitude", "latitude")) %>% 
+          
+          # define projection
+          `proj4string<-` (projection)
+        
+        # output result
+        Tag
+      }
+    }
+    
+    else{
+      print("Unknown tag_model. Options are 'PinPoint-10' or 'nanoFix-mini'.")
+    }
+  }
+
+# convert sf geometry to columns
+sfc_as_cols <- function(x, geometry, names = c("x","y")) {
+  if (missing(geometry)) {
+    geometry <- sf::st_geometry(x)
+  } else {
+    geometry <- rlang::eval_tidy(enquo(geometry), x)
+  }
+  stopifnot(inherits(x,"sf") && inherits(geometry,"sfc_POINT"))
+  ret <- sf::st_coordinates(geometry)
+  ret <- tibble::as_tibble(ret)
+  stopifnot(length(names) == ncol(ret))
+  x <- x[ , !names(x) %in% names]
+  ret <- setNames(ret,names)
+  dplyr::bind_cols(x,ret)
+}
 ```
 
 # Body Condition Dynamics
@@ -196,6 +536,9 @@ caps_pre2024 <-
   
 colour_band = 0.08
 metal_band = 0.16
+PTT = 1.8
+PTT2 = 2.0
+GPS = 1.2
 
 # bind together
 all_caps <-
@@ -263,6 +606,7 @@ static_measures_pca_KK <-
 # check the PCA results
 summary(static_measures_pca_KK)
 biplot(static_measures_pca_KK, cex = 0.7)
+loadings(static_measures_pca_KK)
 
 # bind PC scores to the original dataframe
 all_caps_pca_KK <-
@@ -356,27 +700,6 @@ avg_wing <-
   pull(wing) %>% 
   mean(., na.rm = TRUE)
 
-scaledMassIndex <-
-  function(x, y, x.0 = mean(x)) {
-    require(smatr)
-    require(magrittr)
-    require(MASS)
-    require(data.table)
-    logM.ols <- lm(log(y) ~ log(x))
-    logM.rob <- rlm(log(y) ~ log(x), method = "M")
-    b.msa.ols <- coef(sma(log(y) ~ log(x)))[2]
-    b.msa.rob <- coef(sma(log(y) ~ log(x), robust = T))[2]
-    SMI.ols <- y * (x.0 / x) ^ b.msa.ols
-    SMI.rob <- y * (x.0 / x) ^ b.msa.rob
-    res <- data.frame(SMI.ols, SMI.rob, x, y)
-    pred.DT <-
-      data.table(x = seq(min(x), max(x), length = 100)) %>%
-      .[, y.ols := predict(logM.ols, newdata = .) %>% exp] %>%
-      .[, y.rob := predict(logM.rob, newdata = .) %>% exp]
-    attr(res, "b.msa") <- c(ols = b.msa.ols, rob = b.msa.rob)
-    return(res)
-  }
-
 smi_ <- 
   scaledMassIndex(x = all_caps_KK_ %>% 
                     ungroup() %>% 
@@ -408,7 +731,7 @@ ggplot(all_caps_KK_smi,
 ```
 
 ### Scaled Mass Index temporal model
-```{r}
+```{r, eval=FALSE}
 #### mixed effects regression ----
 # smi_wing_lmer <-
 #   lmer(smi_wing ~ date_ + tag_type + (1 | ring),
@@ -698,7 +1021,74 @@ first_obs <-
   rename(first_smi_wing = SMI.ols, 
          first_weight = weight,
          first_date = date) %>% 
-  dplyr::select(ring, first_date, first_weight, first_smi_wing, tag_type, treatment_group)
+  dplyr::select(ring, first_date, first_weight, first_smi_wing, tag_type, treatment_group) %>% 
+  mutate(tag_type_ = ifelse(tag_type == "PTT" & year(first_date) == 2021, "PTT2", tag_type))
+
+# first_obs %>% 
+#   ungroup() %>% 
+#   mutate(prop_mass_tag = ifelse(tag_type_ == "PTT2", PTT2 / first_weight,
+#                                 ifelse(tag_type_ == "PTT", PTT / first_weight,
+#                                ifelse(tag_type_ == "GPS", GPS / first_weight, 
+#                                       ifelse(tag_type_ == "control", NA, "XXX")))) %>% as.numeric(),
+#          prop_mass_all = ifelse(tag_type_ == "PTT2", (PTT2 + sum(4 * colour_band, metal_band)) / first_weight,
+#                                 ifelse(tag_type_ == "PTT", (PTT + sum(4 * colour_band, metal_band)) / first_weight,
+#                                ifelse(tag_type_ == "GPS", (GPS + sum(4 * colour_band, metal_band)) / first_weight, 
+#                                       ifelse(tag_type_ == "control", sum(4 * colour_band, metal_band) / first_weight, "XXX")))) %>% as.numeric(),
+#          prop_SMI_tag = ifelse(tag_type_ == "PTT2", PTT2 / first_smi_wing,
+#                                ifelse(tag_type_ == "PTT", PTT / first_smi_wing,
+#                                ifelse(tag_type_ == "GPS", GPS / first_smi_wing, 
+#                                       ifelse(tag_type_ == "control", NA, "XXX")))) %>% as.numeric(),
+#          prop_SMI_all = ifelse(tag_type_ == "PTT2", (PTT2 + sum(4 * colour_band, metal_band)) / first_smi_wing,
+#                                ifelse(tag_type_ == "PTT", (PTT + sum(4 * colour_band, metal_band)) / first_smi_wing,
+#                                ifelse(tag_type_ == "GPS", (GPS + sum(4 * colour_band, metal_band)) / first_smi_wing, 
+#                                       ifelse(tag_type_ == "control", sum(4 * colour_band, metal_band) / first_smi_wing, "XXX")))) %>% as.numeric()) %>% 
+#   ungroup() %>% 
+#   summarise(mean_first_smi_wing = mean(first_smi_wing, na.rm = TRUE))
+#   arrange(desc(prop_SMI_all))
+#   group_by(tag_type) %>% 
+#   summarise(mean_tag_SMI = mean(prop_SMI_tag, na.rm = TRUE) * 100,
+#             median_tag_SMI = median(prop_SMI_tag, na.rm = TRUE) * 100,
+#             # min_tag_SMI = min(prop_SMI_tag, na.rm = TRUE) * 100,
+#             # max_tag_SMI = max(prop_SMI_tag, na.rm = TRUE) * 100,
+#             # sd_tag_SMI = sd(prop_SMI_tag, na.rm = TRUE) * 100,
+#             mean_all_SMI = mean(prop_SMI_all, na.rm = TRUE) * 100,
+#             median_all_SMI = median(prop_SMI_all, na.rm = TRUE) * 100,
+#             # min_all_SMI = min(prop_SMI_all, na.rm = TRUE) * 100,
+#             # max_all_SMI = max(prop_SMI_all, na.rm = TRUE) * 100,
+#             # sd_all_SMI = sd(prop_SMI_all, na.rm = TRUE) * 100,
+#             mean_tag_mass = mean(prop_mass_tag, na.rm = TRUE) * 100,
+#             median_tag_mass = median(prop_mass_tag, na.rm = TRUE) * 100,
+#             # min_tag_mass = min(prop_mass_tag, na.rm = TRUE) * 100,
+#             # max_tag_mass = max(prop_mass_tag, na.rm = TRUE) * 100,
+#             # sd_tag_mass = sd(prop_mass_tag, na.rm = TRUE) * 100,
+#             mean_all_mass = mean(prop_mass_all, na.rm = TRUE) * 100,
+#             median_all_mass = median(prop_mass_all, na.rm = TRUE) * 100,
+#             # min_all_mass = min(prop_mass_all, na.rm = TRUE) * 100,
+#             # max_all_mass = max(prop_mass_all, na.rm = TRUE) * 100,
+#             # sd_all_mass = sd(prop_mass_all, na.rm = TRUE) * 100
+#             ) %>% 
+#   t() %>% as.data.frame() %>% rename(GPS = V1, 
+#                                                                                                         PTT = V2, 
+#                                                                                                         # PTT2 = V3, 
+#                                                                                                         control = V3) %>% slice(-1)
+
+all_caps %>% 
+  group_by(ring) %>%
+  summarise(
+    mass_min = min(weight),
+    mass_max = max(weight),
+    mass_difference = max(weight) - min(weight),
+    mean_tarsus = mean(tarsus, na.rm = TRUE),
+    mean_wing = mean(wing, na.rm = TRUE),
+    mean_bill = mean(culmen, na.rm = TRUE)) %>%
+  arrange(desc(mass_difference)) %>% 
+  mutate(min_smi_wing = mass_min * (avg_wing/mean_wing)^weight_wing_sma_slope,
+         max_smi_wing = mass_max * (avg_wing/mean_wing)^weight_wing_sma_slope)
+
+all_caps %>% ungroup() %>% summarise(mean_wing = mean(wing, na.rm = TRUE),
+                                     mean_mass = mean(weight, na.rm = TRUE))
+
+73.5 * (avg_wing/avg_wing)^weight_wing_sma_slope
 
 # wrangle the repeated measures data
 repeated_measures <-
@@ -735,41 +1125,41 @@ smi_wing_lmer_seq <-
   lmer(smi_wing ~ tag_type * measure + (1 | ring), 
        data = repeated_measures)
 
-# Set or adjust priors if necessary
-prior <- c(
-  set_prior("normal(0, 10)", class = "b"),
-  set_prior("cauchy(0, 2)", class = "sd")
-)
+# # Set or adjust priors if necessary
+# prior <- c(
+#   set_prior("normal(0, 10)", class = "b"),
+#   set_prior("cauchy(0, 2)", class = "sd")
+# )
+# 
+# smi_wing_brm <- brm(
+#   smi_wing ~ tag_type * measure + (1 | ring), 
+#   data = repeated_measures,
+#   family = gaussian(), 
+#   prior = prior, 
+#   chains = 4, 
+#   cores = 4, 
+#   iter = 4000,  
+#   warmup = 2000
+# )
 
-smi_wing_brm <- brm(
-  smi_wing ~ tag_type * measure + (1 | ring), 
-  data = repeated_measures,
-  family = gaussian(), 
-  prior = prior, 
-  chains = 4, 
-  cores = 4, 
-  iter = 4000,  
-  warmup = 2000
-)
-
-# Summary of the brms model
-summary(smi_wing_brm)
-
-# Check Effective Sample Size and R-hat
-print(smi_wing_brm)
-
-# Plot the posterior distributions
-plot(smi_wing_brm)
-
-# Posterior predictive checks
-pp_check(smi_wing_brm)
+# # Summary of the brms model
+# summary(smi_wing_brm)
+# 
+# # Check Effective Sample Size and R-hat
+# print(smi_wing_brm)
+# 
+# # Plot the posterior distributions
+# plot(smi_wing_brm)
+# 
+# # Posterior predictive checks
+# pp_check(smi_wing_brm)
 
 # Derive confidence intervals of effect sizes from parametric bootstrapping
 tidy_smi_wing_lmer_seq <-
   tidy(smi_wing_lmer_seq, conf.int = TRUE, conf.method = "boot", nsim = 1000)
 
-tidy_smi_wing_brm <-
-  tidy(smi_wing_brm, conf.int = TRUE)
+# tidy_smi_wing_brm <-
+#   tidy(smi_wing_brm, conf.int = TRUE)
 
 # run rptR to obtain repeatabilities of random effects
 rpt_smi_wing_lmer_seq <-
@@ -827,10 +1217,10 @@ sample_sizes <-
 # clean model component names
 mod_comp_names <-
   data.frame(comp_name = c("Control group SMI (g; baseline intercept))",
-                           "Relative SMI (g) of 1.3g GPS tag group",
+                           "Relative SMI (g) of 1.2g GPS tag group",
                            "Relative SMI (g) of 1.8g PTT tag group",
                            "\u0394 SMI (g) in control group",
-                           "Additional \u0394 SMI (g) for 1.3g GPS tag",
+                           "Additional \u0394 SMI (g) for 1.2g GPS tag",
                            "Additional \u0394 SMI (g) for 1.8g PTT tag",
                            "Total Marginal \U1D479\U00B2",
                            "Tag type",
@@ -925,7 +1315,7 @@ smi_wing_lmer_seq_table <-
   dplyr::select(effect, comp_name, estimate, coefString) %>%
   gt(rowname_col = "row",
      groupname_col = "effect") %>%
-  cols_label(comp_name = html("<i> </i>"),
+  cols_label(comp_name = html("<i>Scaled mass index (SMI) dynamics</i>"),
              estimate = "Mean estimate",
              coefString = "95% confidence interval") %>%
   fmt_number(columns = c(estimate),
@@ -948,19 +1338,16 @@ smi_wing_lmer_seq_table <-
               summary_row.padding = 2,
               column_labels.font.size = 14,
               row_group.font.size = 12,
-              table.width = pct(75))
+              table.width = pct(100))
 
 smi_wing_lmer_seq_table
-
-# Load the MuMIn package for R-squared calculation
-library(MuMIn)
 
 # Calculate R-squared values
 r.squared <- r.squaredGLMM(smi_wing_lmer_seq)
 print(r.squared)
 
 #### plotting ----
-bdot_treatment_group_facets <- c('GPS' = "1.3g GPS tag", 
+bdot_treatment_group_facets <- c('GPS' = "1.2g GPS tag", 
                                  'PTT' = "1.8g PTT tag", 
                                  'control' = "control")
 
@@ -971,7 +1358,7 @@ bdot_breeding_fate_facets <- c('aband' = "abandoned",
                                'unkn' = "unknown fate")
 
 
-custom_colors <- brewer.pal(9, "Pastel1")[c(9, 2, 3)]
+custom_colors <- brewer.pal(9, "Pastel1")[c(9, 3, 2)]
 
 # Add Google font Lato
 font_add_google("Lato", "lato")
@@ -979,43 +1366,61 @@ font_add_google("Lato", "lato")
 # Automatically use showtext to render text
 showtext_auto()
 
+# Assuming 'nest_fates' is your data frame
+# Calculate the sample sizes
+sample_sizes <-
+  repeated_measures %>%
+  group_by(tag_type, measure) %>%
+  summarise(n = n()) %>%
+  ungroup() %>% 
+  mutate(n = as.character(n)) %>% 
+  mutate(n = ifelse(tag_type %in% c("GPS", "PTT") & measure == "second", paste0(n, "*"), n))
+
 repeated_measures_ <- 
   repeated_measures %>%
   mutate(x_line = ifelse(measure == "first", as.numeric(factor(measure)) + 0.15,
                          ifelse(measure == "second", as.numeric(factor(measure)) - 0.15, NA)),
          x_point = ifelse(measure == "first", as.numeric(factor(measure)), 
-                          ifelse(measure == "second", as.numeric(factor(measure)), NA)))
+                          ifelse(measure == "second", as.numeric(factor(measure)), NA))) %>% 
+  left_join(sample_sizes, by = c("tag_type", "measure"))
 
-ggplot(data = repeated_measures_) + 
+repeated_measures_plot <- 
+  ggplot(data = repeated_measures_) + 
   geom_line(aes(x = x_line, y = smi_wing, group = ring), color = "grey40", alpha = 0.5) + 
-  geom_jitter(size = 6, aes(x = x_point, y = smi_wing, fill = tag_type, shape = measure), 
+  geom_jitter(size = 4, aes(x = x_point, y = smi_wing, fill = tag_type, shape = measure), 
              shape = 21, color = "grey40", alpha = 1, width = 0.075) +
   # scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = custom_colors) +
   facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
   theme(legend.position = "none",
         text = element_text(family = "lato"),
-        axis.title = element_text(size = 11, colour = "grey40"),
+        axis.title.x = element_blank(),
         axis.ticks = element_blank(),
         # axis.ticks.length = unit(0.1, "cm"),
         axis.text = element_text(size = 10, colour = "grey40"),
-        axis.title.y = element_text(size = 12),
-        axis.text.y = element_text(size = 10),
+        axis.title.y = element_text(size = 11, colour = "grey40"),
+        axis.text.y = element_text(size = 10, colour = "grey40"),
         plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.spacing = unit(1, "cm"),
         panel.background = element_rect(fill = 'transparent', color = NA),
         plot.background = element_rect(fill = 'transparent', color = NA), 
-        strip.background = element_rect(fill = 'transparent', color = NA),
+        strip.background = element_rect(fill = 'grey90', color = NA),
         strip.text = element_text(size = 13, colour = "grey40"),
         panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
-        panel.grid.minor = element_blank()) +
-  scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first", "second")) +
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first\ncapture", "second\ncapture")) +
+  scale_y_continuous(breaks = c(50, 60, 70), limits = c(38, 80)) +
   # scale_y_continuous(limits = c(43, 73)) +
   # geom_hline(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043,
   #            color = "grey", linetype = "dashed") +
   # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
   #            color = "grey", linetype = "dashed") +
   xlab("capture event") +
-  ylab("scaled body mass index (g)")# +
+  ylab("scaled body mass\nindex (g)") +
+  geom_text(data = repeated_measures_ %>% ungroup() %>% dplyr::select(x_point, n, tag_type) %>% distinct(), aes(label = n, y = 38, x = x_point),  # Adjust 'y' to place the text appropriately
+            size = 3, color = "black", vjust = 0)# +
+repeated_measures_plot
   # geom_hline(data = subset(repeated_measures_, tag_type == "PTT"), aes(yintercept = sum(PTT, harness, 4 * colour_band, metal_band) / 0.043),
   #            color = "grey", linetype = "dashed") +
   # geom_hline(data = subset(repeated_measures_, tag_type == "GPS"), aes(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043),
@@ -1057,7 +1462,7 @@ ggplot(data = repeated_measures_) +
 ```
 
 ### Percentage of mass model
-```{r}
+```{r, eval=FALSE}
 #### percentage of weight ----
 repeated_measures__ <- 
   repeated_measures %>%
@@ -1273,51 +1678,9 @@ ggplot(repeated_measures__,
   theme_minimal()
 ```
 
-
 # Breeding status and outcome
 ### data import and wrangle
 ```{r}
-# Function to extract the required characters
-extract_and_merge <- function(text) {
-  # Extract part before and after "|"
-  parts <- str_split(text, "\\|", simplify = TRUE)
-  part1 <- parts[1]
-  part2 <- parts[2]
-  
-  # Extract the two characters to the left of the "|"
-  left_chars <- str_sub(part1, -2, -1)
-  
-  # Extract the last two characters
-  right_chars <- str_sub(part2, -2, -1)
-  
-  # Merge these four characters together
-  paste0(left_chars, right_chars)
-}
-
-# Define a function to extract the desired patterns and ensure enough columns
-extract_patterns <- function(text) {
-  # Replace vertical bar '|' with an empty string
-  text <- gsub("\\|", "", text)
-  
-  # Extract all 4 or 5-character long texts that start with R or r
-  matches_r <- str_extract_all(text, "\\b[Rr]\\w{3,4}\\b")[[1]]
-  
-  # Extract UB, UN, UBF, UBM as standalone patterns
-  matches_ub_un <- str_extract_all(text, "\\b[Uu][BbNnFfMm]\\b")[[1]]
-  
-  # Combine matches
-  matches <- c(matches_r, matches_ub_un)
-  
-  # Ensure all matches are capitalized
-  matches <- toupper(matches)
-  
-  # Ensure there are exactly two columns, filling with NA if necessary
-  result <- c(matches, rep(NA, 2 - length(matches)))
-  
-  # Return the result as a named vector
-  return(setNames(result, c("parent1", "parent2")))
-}
-
 # Apply the function to the dataframe
 all_caps_KK <- 
   readRDS("data/all_caps_KK.rds") %>% 
@@ -1526,8 +1889,8 @@ nest_fates %>%
   filter(tag_type == "PTT") %>% 
   pull(parent) %>% unique() %>% sort()
 
-bdot_ch %>% 
-  filter(parent %in% c("RBOG", "RBWO"))
+# bdot_ch %>% 
+#   filter(parent %in% c("RBOG", "RBWO"))
 # "RBOG" and "RBWO"
 ```
 
@@ -1563,6 +1926,12 @@ model_brm <- brm(
   control = list(adapt_delta = 0.99, max_treedepth = 15)  # Adjusted control parameters for better convergence
   # prior = priors  # Use the defined priors
 )
+
+nest_fates %>%
+  dplyr::select(nest_id, state) %>% 
+  distinct() %>%
+  group_by(state) %>% 
+  summarise(n_nests = n()/132)
 
 summary(model_brm)
 
@@ -1626,9 +1995,9 @@ sample_sizes <- nest_fates %>%
 predictions_tag_type_ <- predictions_tag_type_ %>%
   left_join(sample_sizes, by = c("x", "response.level"))
 
-custom_colors_ <- brewer.pal(9, "Set1")[c(9, 2, 3)]
+custom_colors_ <- brewer.pal(9, "Set1")[c(9, 3, 2)]
 
-# tag_type_breeding_fate_plot <-
+tag_type_breeding_fate_plot <-
   ggplot(data = predictions_tag_type_) +
   geom_errorbar(aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high, color = x), 
                size = 0.3, linetype = "solid", width = 0.1) +
@@ -1638,11 +2007,54 @@ custom_colors_ <- brewer.pal(9, "Set1")[c(9, 2, 3)]
   geom_text(aes(label = n, y = 1, x = x),  # Adjust 'y' to place the text appropriately
             size = 3, color = "black", vjust = 0) +  # Adjust 'size' and 'vjust' as needed +
   theme_bw() + 
-  dipper_theme +
-  ylab("Probability (± 95% CI)") +
+    theme(legend.position = "none") +
+  # dipper_theme +
+  ylab("probability (± 95% CI)") +
+  xlab("tag type") +
   scale_y_continuous(limits = c(0, 1)) +
   # scale_color_brewer(palette = "Set1") +
-  facet_grid(~ response.level, labeller = as_labeller(bdot_breeding_fate_facets))
+  # facet_grid(~ response.level, labeller = as_labeller(bdot_breeding_fate_facets))
+  facet_grid(~ x, labeller = as_labeller(bdot_treatment_group_facets))
+
+tag_type_breeding_fate_plot_ <-
+  ggplot(data = predictions_tag_type_) +
+  geom_errorbar(aes(x = response.level, y = predicted, ymin = conf.low, ymax = conf.high, color = x), 
+               size = 0.3, linetype = "solid", width = 0.1) +
+  geom_point(aes(x = response.level, y = predicted, fill = x, shape = response.level), size = 4, color = "grey40", alpha = 1) +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors_) +
+  geom_text(aes(label = n, y = -0.2, x = response.level),  # Adjust 'y' to place the text appropriately
+            size = 3, color = "black", vjust = 0) +  # Adjust 'size' and 'vjust' as needed +
+  # theme_bw() + 
+  theme(legend.position = "none",
+        text = element_text(family = "lato"),
+        axis.ticks = element_blank(),
+        # axis.ticks.length = unit(0.1, "cm"),
+        axis.title.y = element_text(size = 11, colour = "grey40"),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10, colour = "grey40", angle = 45, hjust = 1),
+        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(fill = 'transparent', color = NA), 
+        strip.background = element_rect(fill = 'transparent', color = NA),
+        strip.text = element_blank(),
+        panel.spacing = unit(1, "cm"),
+        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  # dipper_theme +
+  ylab("fate probability\n(± 95% CI)") +
+  xlab("breeding attempt fate") +
+  scale_y_continuous(limits = c(-0.2, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_x_discrete(labels = c("abandoned", "hatch", "nest failure", "fledged young", "unknown")) +
+  # scale_color_brewer(palette = "Set1") +
+  # facet_grid(~ response.level, labeller = as_labeller(bdot_breeding_fate_facets))
+  facet_grid(~ x, labeller = as_labeller(bdot_treatment_group_facets)) +
+  scale_shape_manual(values = c(21, 22, 23, 24, 25))
+
+library(patchwork)
+repeated_measures_plot / tag_type_breeding_fate_plot_
 
 # Calculate sample sizes
 sample_sizes <- nest_fates %>%
@@ -1656,12 +2068,12 @@ annotation_df <- sample_sizes %>%
     response.level = state,
     label = paste0("n = ", n)
   ) %>% 
-  bind_rows(., data.frame(tag_type = c("GPS", "PTT"),
-                          state = c("aband", "unkn"),
-                          n = c(0, 0),
-                          x = c("GPS", "PTT"),
-                          response.level = c("aband", "unkn"),
-                          label = c("n = 0", "n = 0")))
+  bind_rows(., data.frame(tag_type = c("GPS", "PTT", "GPS"),
+                          state = c("aband", "unkn", "fledge"),
+                          n = c(0, 0, 0),
+                          x = c("GPS", "PTT", "GPS"),
+                          response.level = c("aband", "unkn", "fledge"),
+                          label = c("n = 0", "n = 0", "n = 0")))
 facet_labels <- c(
   "aband" = "abandoned",
   "brood" = "hatched",
@@ -1687,10 +2099,8 @@ ggplot(as.data.frame(predictions_tag_type), aes(x = x, y = predicted, color = x)
 ```
 
 # Apparent survival
+### data import and wrangling
 ```{r}
-# install.packages("BaSTA")
-# library(BaSTA)
-# 
 # dat %>% 
 #   group_by(season, rings_comb) %>% 
 #   summarise(n_obs = n()) %>% 
@@ -1700,7 +2110,7 @@ ggplot(as.data.frame(predictions_tag_type), aes(x = x, y = predicted, color = x)
 #                    d = .$season,
 #                    timeInt = "Y") %>% 
 #   write.csv(., 
-#             "/Users/luketheduke2/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/data/mark_recapture_df.csv", row.names = FALSE)
+#             "/Users/leberhart/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/data/mark_recapture_df.csv", row.names = FALSE)
 
 bdot_ch <- 
   read.csv("/Users/leberhart/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/data/mark_recapture_df.csv") %>% 
@@ -1741,7 +2151,7 @@ bdot_ch %>%
   summarise(n())
 ```
 
-
+### modelling
 ```{r}
 # Specify the states and create the dataframe for RMark
 bdot_processed <- process.data(bdot_ch, model = "Multistrata", groups = NULL)
@@ -1765,7 +2175,8 @@ Psi.model.stratumto <- list(formula = ~ -1+stratum:tostratum)
 Psi.model.stratumtotime <- list(formula = ~ -1+stratum:tostratum:time)  # Transition probabilities depend on the state and destination state
 
 model.list <- create.model.list("Multistrata") 
-bdot.results <- mark.wrapper(model.list, data = bdot_processed, ddl = bdot_ddl)
+bdot.results <- mark.wrapper(model.list, data = bdot_processed, ddl = bdot_ddl,
+                          threads = 4, brief = TRUE, delete = TRUE)
 bdot.results$S.model.p.model.Psi.model.stratumtotime$results$real
 
 # extract and format the transformed parameter estimates
@@ -1779,85 +2190,1415 @@ bdot_estimates <-
                                             ifelse(X1 == "p", "p", "Psi"))),
                 transition = ifelse(X1 == "Psi", paste0(str_sub(X2, 2, 2), X3), NA),
                 year = ifelse(X1 == "Psi", ifelse(str_sub(X5, 10, 11) == "t1", 2021, 2022), NA)) %>% 
-  dplyr::select(parameter, tag_type, transition, year, estimate, lcl, ucl) %>% 
+  dplyr::select(parameter, tag_type, transition, year, estimate, lcl, ucl, se) %>% 
   `rownames<-`( NULL )
   
 #### Plotting ####
-# first setup the plotting theme
-dipper_theme <- 
-  theme(text = element_text(family = "Franklin Gothic Book"),
-        legend.position = "none",
-        axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 10),
-        axis.title.y = element_text(size = 10,margin = margin(t = 0, r = 10, b = 0, l = 0)),
-        axis.text.y  = element_text(size = 9),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        axis.ticks.y = element_line(size = 0.2, colour = "grey40"),
-        axis.ticks.length = unit(0.1, "cm"),
-        axis.ticks.x = element_line(size = 0.2, colour = "grey40"),
-        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm"),
-        panel.spacing = unit(0.3, "lines"),
-        strip.background = element_blank(),
-        strip.text = element_text(size = 12),
-        panel.border = element_rect(linetype = "solid", colour = "grey"),
-        panel.background = element_rect(linetype = "solid", fill = "white"))
-
-
 # get sample sizes of individuals used to estimate age-specific rates
-bdot_ch %>% 
+sample_sizes_surv <- 
+  bdot_ch %>% 
   mutate(tag_type = ifelse(str_detect(ch, "P"), "PTT",
                            ifelse(str_detect(ch, "G"), "GPS",
                                   ifelse(str_detect(ch, "C"), "control", NA)))) %>% 
   group_by(tag_type) %>% 
-  summarise(N = n())
+  summarise(n = n())
 
 bdot_estimates %>% as.tibble() %>% print(n = nrow(.))
 
 tag_type_surv_plot <- 
   ggplot(data = filter(bdot_estimates, parameter == "Phi"),
-         aes(x = tag_type, y = estimate, color = tag_type)) +
-  geom_errorbar(aes(ymin = lcl, ymax = ucl), 
+         aes(x = tag_type, y = estimate, fill = tag_type)) +
+  geom_errorbar(aes(ymin = lcl, ymax = ucl, color = tag_type), 
                size = 0.3, linetype = "solid", width = 0.1) +
-  geom_point(size = 3) +
-  theme_bw() + 
-  dipper_theme +
+  geom_point(shape = 21, size = 4) +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors_) +
+  geom_text(data = sample_sizes_surv, aes(label = n, y = -0.15, x = tag_type),  # Adjust 'y' to place the text appropriately
+            size = 3, color = "black", vjust = 0) +  # Adjust 'size' and 'vjust' as needed +
+  # theme_bw() + 
+  theme(legend.position = "none",
+        text = element_text(family = "lato"),
+        axis.title = element_text(size = 11, colour = "grey40"),
+        axis.ticks = element_blank(),
+        # axis.ticks.length = unit(0.1, "cm"),
+        axis.title.y = element_text(size = 12),
+        axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10, colour = "grey40", angle = 45, hjust = 1),
+        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(fill = 'transparent', color = NA), 
+        strip.background = element_rect(fill = 'transparent', color = NA),
+        strip.text = element_blank(),
+        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
   ylab("Apparent survival (± 95% CI)") +
-  scale_y_continuous(limits = c(0, 1)) +
-  scale_color_brewer(palette = "Set1") +
-  annotate(geom = "text", y = 0.6, x = 1, angle = 0,
-           label = "N = 74", 
-           color = "grey30", size = 2.5, fontface = 'italic') +
-  annotate(geom = "text", y = 0.45, x = 2, angle = 0,
-           label = "N = 10", 
-           color = "grey30", size = 2.5, fontface = 'italic') +
-  annotate(geom = "text", y = 0.45, x = 3, angle = 0,
-           label = "N = 10", 
-           color = "grey30", size = 2.5, fontface = 'italic')
+  scale_y_continuous(limits = c(0, 1)) #+
+  # scale_color_manual(palette = "Set1") +
+  facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets))
+  
+  
+tag_type_surv_p_plot <- 
+  ggplot(data = filter(bdot_estimates, parameter %in% c("Phi", "p")),
+         aes(x = parameter, y = estimate, fill = tag_type)) +
+  geom_errorbar(aes(ymin = lcl, ymax = ucl, color = tag_type), 
+               size = 0.3, linetype = "solid", width = 0.05) +
+  geom_point(aes(shape = parameter), size = 4, color = "grey40", alpha = 1) +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors_) +
+  # geom_text(data = sample_sizes_surv, aes(label = n, y = -0.15, x = tag_type),  # Adjust 'y' to place the text appropriately
+  #           size = 3, color = "black", vjust = 0) +  # Adjust 'size' and 'vjust' as needed +
+  # # theme_bw() + 
+  theme(legend.position = "none",
+        text = element_text(family = "lato"),
+        axis.title.x = element_blank(),
+        axis.ticks = element_blank(),
+        # axis.ticks.length = unit(0.1, "cm"),
+        axis.title.y = element_text(size = 11, colour = "grey40"),
+        axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10, colour = "grey40", angle = 45, hjust = 1),
+        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.spacing = unit(1, "cm"),
+        panel.background = element_rect(fill = 'white', color = NA),
+        plot.background = element_rect(fill = 'white', color = NA), 
+        strip.background = element_rect(fill = 'white', color = NA),
+        strip.text = element_blank(),
+        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  ylab("probability\n(± 95% CI)") +
+  scale_y_continuous(limits = c(-0.15, 1.1), breaks = c(0, .25, .5, .75, 1)) +
+  scale_x_discrete(labels = c("encounter\nprobability", "apparent\nsurvival")) +
+  scale_shape_manual(values = c(21, 22)) +
+  facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
+  geom_text(data = sample_sizes_surv, aes(x = 1.5, y = -0.15, label = n), size = 3, color = "black", vjust = 0)
 
-tag_type_p_plot <- 
-  ggplot(data = filter(bdot_estimates, parameter == "p"),
-         aes(x = tag_type, y = estimate, color = tag_type)) +
-  geom_errorbar(aes(ymin = lcl, ymax = ucl), 
-               size = 0.3, linetype = "solid", width = 0.1) +
-  geom_point(size = 3) +
-  theme_bw() + 
-  dipper_theme +
-  ylab("Apparent survival (± 95% CI)") +
-  scale_y_continuous(limits = c(0, 1)) +
-  scale_color_brewer(palette = "Set1") +
-  annotate(geom = "text", y = 0.6, x = 1, angle = 0,
-           label = "N = 74", 
-           color = "grey30", size = 2.5, fontface = 'italic') +
-  annotate(geom = "text", y = 0.45, x = 2, angle = 0,
-           label = "N = 10", 
-           color = "grey30", size = 2.5, fontface = 'italic') +
-  annotate(geom = "text", y = 0.45, x = 3, angle = 0,
-           label = "N = 10", 
-           color = "grey30", size = 2.5, fontface = 'italic')
+combo_plot <- 
+  repeated_measures_plot / plot_spacer() / tag_type_breeding_fate_plot_ / tag_type_surv_p_plot + 
+  plot_layout(heights = c(1, 0.1, 1, 1))
 
-tag_type_p_plot
+combo_plot
+  
+#   ggsave(plot = combo_plot, 
+#        filename = "combo_plot.png", 
+#        path = "tabs_figs/", dpi = 300, 
+#        height = 12, width = 8, units = "in")
+#   
+# tag_type_p_plot <- 
+#   ggplot(data = filter(bdot_estimates, parameter == "p"),
+#          aes(x = tag_type, y = estimate, color = tag_type)) +
+#   geom_errorbar(aes(ymin = lcl, ymax = ucl), 
+#                size = 0.3, linetype = "solid", width = 0.1) +
+#   geom_point(size = 3) +
+#   theme_bw() + 
+#   dipper_theme +
+#   ylab("Apparent survival (± 95% CI)") +
+#   scale_y_continuous(limits = c(0, 1)) +
+#   scale_color_brewer(palette = "Set1") +
+#   annotate(geom = "text", y = 0.6, x = 1, angle = 0,
+#            label = "N = 74", 
+#            color = "grey30", size = 2.5, fontface = 'italic') +
+#   annotate(geom = "text", y = 0.45, x = 2, angle = 0,
+#            label = "N = 10", 
+#            color = "grey30", size = 2.5, fontface = 'italic') +
+#   annotate(geom = "text", y = 0.45, x = 3, angle = 0,
+#            label = "N = 10", 
+#            color = "grey30", size = 2.5, fontface = 'italic')
+# 
+# tag_type_p_plot
 ```
+
+# Movements of tagged birds
+### wrangle GPS data
+```{r}
+NFTag55843_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55843/Obs161122_192740_Tag55843.pos",
+                                tag_ID = "NF55843", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9042", bird_code = "FWX.RR|MX.YY", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+NFTag20865_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag20865/Obs261022_231825_Tag20865.pos",
+                                tag_ID = "NF20865", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9055", bird_code = "FWX.RR|MX.LR", bird_sex = "M", species = "BADO", population = "kaikoura")
+
+NFTag21146_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag21146/Obs261022_234604_Tag21146.pos",
+                                tag_ID = "NF21146", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9098", bird_code = "XX.RW|MX.LB", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+NFTag55687_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55687/Obs261022_232953_Tag55687.pos",
+                                tag_ID = "NF55687", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9032", bird_code = "XX.RB|MX.BR", bird_sex = "M", species = "BADO", population = "kaikoura")
+
+NFTag55660_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55660/Obs031222_180904_Tag55660.pos",
+                                tag_ID = "NF55660", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9066", bird_code = "XX.RB|MX.BY", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+NFTag55795_nz <- 
+  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55795/Obs261022_233831_Tag55795.pos",
+                                tag_ID = "NF55795", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
+                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
+                                bird_ID = "CP9096", bird_code = "XX.RW|MX.BY", bird_sex = "F", species = "BADO", population = "kaikoura")
+
+pre_2024_gps_data <- 
+  bind_rows(as.data.frame(NFTag55843_nz),
+            as.data.frame(NFTag20865_nz), as.data.frame(NFTag21146_nz),
+            as.data.frame(NFTag55687_nz), as.data.frame(NFTag55660_nz),
+            as.data.frame(NFTag55795_nz))  %>% 
+  mutate(date_local = as.POSIXct(with_tz(ymd_hms(timestamp, tz = 'UTC'), 'Pacific/Auckland')),
+         site = "KK") %>% 
+  mutate(parent = sapply(.$code, extract_and_merge)) %>% 
+  dplyr::select(-c(timestamp, timestamp_simple, fix_number, satellites, elevation, species, population, code)) %>% 
+  rename(volt = battery,
+         tagID = tag_ID,
+         field_sex = sex) 
+
+pre_2024_gps_data_ <- 
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
+             sheet = "Captures", col_types = "c") %>% 
+  dplyr::filter(age == "A" & site == "KK") %>% 
+  filter(species == "BADO") %>% 
+  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
+                      ifelse(tag == "66891" & year == "2022", "66891_2", 
+                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
+         date = ifelse(code == "XX.RW|MX.LG", "2610",
+                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
+         year = ifelse(code == "XX.RW|MX.LG", "2022",
+                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
+  filter(!is.na(date)) %>% 
+  mutate(date = paste(year, ifelse(nchar(date) == 3,
+                                   substring(date, first = 2, last = 3),
+                                   substring(date, first = 3, last = 4)),
+                      ifelse(nchar(date) == 3,
+                             substring(date, first = 1, last = 1),
+                             substring(date, first = 1, last = 2)),
+                      sep = "-") %>% ymd()) %>% 
+  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
+  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>% 
+  # mutate(date_dep = ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland')) %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>%
+  dplyr::select(ring, site, code, tag, field_sex, date_dep) %>% 
+  filter(!is.na(tag) & nchar(tag) > 1) %>% 
+  group_by(ring) %>% 
+  arrange(date_dep) %>% 
+  slice(1) %>% 
+  left_join(pre_2024_gps_data %>% dplyr::select(-c(site, field_sex)), ., by = "ring") %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  dplyr::select(-c(code, tag))
+
+```
+
+### wrangle 2024 PTT data
+```{r}
+# establish a connection to the entire database (i.e., that I have access to)
+con = dbcon()
+# connect to the FIELD_2024_BADOatNZ local database
+dbExecute(con, "USE FIELD_2024_BADOatNZ")
+caps_2024 <-
+  dbq(con, "SELECT * FROM CAPTURES") %>% 
+  rowwise() %>% 
+  mutate(time_cap = as.hms(max(cap_start, caught, released, na.rm = TRUE))) %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time_cap, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>% 
+  dplyr::select(ring, field_sex, site, date_dep, tag_id) %>% 
+  rename(tagID = tag_id) #%>% filter(!is.na(UR)) %>% rename(flag = UR) %>% filter(site %in% c("MS", "PB", "KP")) %>% dplyr::select(flag, field_sex, site, tagID) %>% mutate(flag = ifelse(str_starts(flag, "FW"), str_sub(flag, 3), flag)) %>% arrange(site) %>%  write.csv("data/Tasman_Bay_banded_dotterels.csv")
+
+tag_data_2024 <-
+  bind_rows(read.csv("data/PTT/ArgosData_2024_12_19_19_41_20.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_40_37.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_39_43.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_38_57.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_38_33.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_37_26.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_36_30.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_35_42.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_34_57.csv", stringsAsFactors = FALSE),
+            read.csv("data/PTT/ArgosData_2024_12_19_19_33_16.csv", stringsAsFactors = FALSE)) %>% 
+  mutate(temp = (0.474 * SENSOR.01) - 35.662,
+         volt = (0.0079 * SENSOR.02) + 2.4129,
+         acc = SENSOR.04) %>% 
+  dplyr::select(Platform.ID.No., 
+                Loc..date, 
+                Loc..quality, 
+                Longitude, 
+                Latitude, 
+                # Semi.major.axis, 
+                # Semi.minor.axis, 
+                # Ellipse.orientation, 
+                temp, volt, acc) %>% 
+  rename(tagID = Platform.ID.No.,
+         date = Loc..date,
+         locationClass = Loc..quality,
+         longitude = Longitude,
+         latitude = Latitude#,
+         # smaj = Semi.major.axis,
+         # smin = Semi.minor.axis,
+         # eor = Ellipse.orientation
+         ) %>% 
+  mutate(date_ = as_datetime(date),
+         tagID = as.character(tagID)) %>% 
+  mutate(date_local = as.POSIXct(with_tz(ymd_hms(date, tz = 'UTC'), 'Pacific/Auckland'))) %>% 
+  left_join(., caps_2024, by = "tagID") %>% 
+         filter(date_local >= date_dep) %>% 
+         filter(!is.na(volt)) %>% 
+         # dplyr::select(-temp) %>% 
+         distinct() %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  filter(tagID != "266470") %>% 
+  dplyr::select(tagID, ring, field_sex, site, date_local, locationClass, longitude, latitude, volt, temp, time_since_deployment, date_dep) #%>% 
+  # dplyr::select(-c(locationClass))
+```
+
+### wrangle pre-2024 PTT data
+```{r}
+# wrangle KK PTT data
+tag_date_info <-
+  read_excel(here("data/tag_deploy_retrieve_dates.xlsx"), 
+                     col_types = "text") %>%
+  mutate(recapture_date = as.Date(as.POSIXct(as.numeric(recapture_date) * 86400, origin = "1899-12-30", tz = "UTC")),
+         last_argos_data = as.Date(as.POSIXct(as.numeric(last_argos_data) * 86400, origin = "1899-12-30", tz = "UTC")),
+         deployment_date = as.Date(as.POSIXct(as.numeric(deployment_date) * 86400, origin = "1899-12-30", tz = "UTC")))
+
+pre_2024_argos_data <-
+  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
+  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
+  mutate(temp = (0.474 * S1) - 35.662,
+         volt = (0.0079 * S2) + 2.4129) %>% 
+  mutate(date_local = with_tz(locationDate, 'Pacific/Auckland')) %>% 
+  distinct() %>% 
+  mutate(tagID = ifelse(tagID == "66891" & date_local <= as.POSIXct("2022-10-13 12:00:00", tz = 'Pacific/Auckland'), "66891_1",
+                        ifelse(tagID == "66891" & date_local > as.POSIXct("2022-10-13 12:00:00", tz = 'Pacific/Auckland'), "66891_2", tagID)))
+
+pre_2024_argos_data %>% pull(tagID) %>% unique() %>% paste(collapse = ", ")
+
+read.table("../../../argos_data/DIAG - 20250113090548_01.txt", sep = "\t")
+
+# BADO google sheets
+pre_2024_tag_data <-
+  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
+             sheet = "Captures", col_types = "c") %>% 
+  dplyr::filter(age == "A" & site == "KK") %>% 
+  filter(species == "BADO") %>% 
+  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
+                      ifelse(tag == "66891" & year == "2022", "66891_2", 
+                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
+         date = ifelse(code == "XX.RW|MX.LG", "2610",
+                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
+         year = ifelse(code == "XX.RW|MX.LG", "2022",
+                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
+  filter(!is.na(date)) %>% 
+  mutate(date = paste(year, ifelse(nchar(date) == 3,
+                                   substring(date, first = 2, last = 3),
+                                   substring(date, first = 3, last = 4)),
+                      ifelse(nchar(date) == 3,
+                             substring(date, first = 1, last = 1),
+                             substring(date, first = 1, last = 2)),
+                      sep = "-") %>% ymd()) %>% 
+  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
+  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>% 
+  # mutate(date_dep = ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland')) %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>%
+  dplyr::select(ring, site, code, tag, field_sex, date_dep) %>% 
+  filter(!is.na(tag) & nchar(tag) > 1) %>% 
+  mutate(parent = sapply(.$code, extract_and_merge)) %>% 
+  left_join(., tag_date_info, by = "parent") %>% 
+  filter(tag_type == "PTT") %>% 
+  rename(tagID = tag) %>% 
+  dplyr::select(ring, site, tagID, field_sex, date_dep, parent) %>% 
+  left_join(pre_2024_argos_data, ., by = "tagID") %>% 
+  filter(date_local >= date_dep) %>% 
+  mutate(time_since_deployment = date_local - date_dep)  %>% 
+  dplyr::select(tagID, ring, parent, field_sex, site, date_local, locationClass, longitude, latitude, volt, temp, time_since_deployment, date_dep) 
+
+# bind_rows(pre_2024_gps_data, pre_2024_tag_data)
+
+
+# Need to check the following photos to see if RBWR has tag still ("tag seen missing in 30.08.23, assumed to have fallen off during winter (last seen with tag 26.07.2023)":
+# E:/Dotterel Observations/2023/October/2023_10_11 Dot ob CG WT/IMG_7311.JPG
+# E:/Dotterel Observations/2023/November/2023_11_01 Dot ob Sb ro Ph/IMG_9427.JPG
+# E:/Dotterel Observations/2023/November/2023_11_06 Afternoon dot ob CG to SBC/IMG_0174.JPG
+# E:/Dotterel Observations/2023/November/2023_11_06 Afternoon dot ob CG to SBC/IMG_0186.JPG
+# E:/Dotterel Observations/2023/November/2023_11_13 Dot ob CG to Ph/IMG_1111.JPG
+# E:/Dotterel Observations/2023/December/2023_12_23 Dot ob/IMG_7447.JPG
+# E:/Dotterel Observations/2023/December/2023_12_28 Dob ob/IMG_7770.JPG
+# E:/Dotterel Observations/2024/January/2024_01_05 Dot Check SSB to Clealls/IMG_9780.JPG
+# E:/Dotterel Observations/2024/January/2024_01_06 Dot check Clealls to SSB/IMG_9794.JPG
+# E:/Dotterel Observations/2024/January/2024_01_21 Dot ob with Ben/IMG_4124.JPG
+# E:/Dotterel Observations/2024/January/2024_01_21 Dot ob with Ben/IMG_4212.JPG
+# E:/Dotterel Observations/2024/February/2024_02_12 Dot ob SB/IMG_6589.JPG
+# E:/Dotterel Observations/2024/February/2024_02_12 Dot ob SB/IMG_6619.JPG
+
+# Need to check the following photos to see if RBOG has tag still ("tag likely fell off on 23.11.22 - a day after release"):
+# E:/Dotterel Observations/2022/November/2022_11_15 Dot nest NPG/IMG_0011.JPG
+# E:/Dotterel Observations/2023/January/2023_01_17 Dot ob/IMG_6505.JPG
+# E:/Dotterel Observations/2023/January/2023_01_17 Dot ob/IMG_7118.JPG
+# E:/Dotterel Observations/2023/March/2023_03_17 Dot JA arrival back of RRGO/IMG_0007.JPG
+# E:/Dotterel Observations/2023/March/2023_03_17 Dot JA arrival back of RRGO/IMG_0198.JPG
+# E:/Dotterel Observations/2023/March/2023_03_31 Dot ob Point to JA/IMG_0192.JPG
+```
+
+### bind all tag data together
+```{r}
+str(tag_data_2024)
+str(pre_2024_gps_data_)
+str(pre_2024_tag_data)
+
+names(tag_data_2024) %>% sort()
+names(pre_2024_gps_data_) %>% sort()
+names(pre_2024_tag_data) %>% sort()
+
+all_BADO_tagging_data <- 
+  bind_rows(pre_2024_gps_data_ %>% mutate(tag_type = "GPS"), 
+            tag_data_2024 %>% mutate(tag_type = "PTT"), 
+            pre_2024_tag_data %>% mutate(tag_type = "PTT")) %>% 
+  dplyr::select(ring, parent, site, field_sex, tagID, tag_type, date_dep, 
+                date_local, temp, volt, latitude, longitude, locationClass,
+                time_since_deployment)
+```
+
+### plot of tag data collected over time
+```{r}
+all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  group_by(parent, tag_type) %>% 
+  summarise(total_fixes = n(),
+            max_time = max(time_since_deployment, na.rm = TRUE)) %>% 
+  rowwise() %>% 
+  mutate(max_time_weeks = as.numeric(max_time, units = "weeks")) %>% arrange(max_time) %>% 
+  mutate(fixes_per_week = total_fixes/max_time_weeks) %>% 
+  group_by(tag_type) %>% 
+  summarise(mean_ = mean(fixes_per_week),
+            sd_ = sd(fixes_per_week),
+            min_ = min(fixes_per_week),
+            max_ = max(fixes_per_week)) %>% t()
+
+# all_BADO_tagging_data %>% 
+#   filter(site == "KK") %>% 
+#   group_by(parent, tag_type) %>% 
+#   summarise(total_fixes = n(),
+#             max_time = max(time_since_deployment, na.rm = TRUE)) %>% 
+#   rowwise() %>% 
+#   mutate(max_time_weeks = as.numeric(max_time, units = "weeks")) %>% #arrange(max_time) %>% 
+#   # mutate(fixes_per_week = total_fixes/max_time_weeks) %>% 
+#   group_by(tag_type) %>% 
+#   summarise(mean_ = mean(max_time_weeks),
+#             sd_ = sd(max_time_weeks),
+#             min_ = min(max_time_weeks),
+#             max_ = max(max_time_weeks)) %>% t()
+#   # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>% 
+#   mutate(parent = factor(parent, levels = c("RWLB", "RRYY", "RRLR", "RBBR", "RWBY", "RBBY", "RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))) %>% 
+#   pivot_longer(
+#     cols = c(min_time, max_time),
+#     names_to = "time_type",
+#     values_to = "time") %>% 
+#   mutate(time_days = time/86400) %>% 
+#   ggplot() +
+#   geom_line(aes(y = parent, x = time_days, color = tag_type))
+
+
+all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  group_by(parent, tag_type) %>% 
+  summarise(min_time = duration(0),
+            max_time = max(time_since_deployment, na.rm = TRUE)) %>%
+  # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>% 
+  mutate(parent = factor(parent, levels = c("RWLB", "RRYY", "RRLR", "RBBR", "RWBY", "RBBY", "RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))) %>% 
+  pivot_longer(
+    cols = c(min_time, max_time),
+    names_to = "time_type",
+    values_to = "time") %>% 
+  mutate(time_days = time/86400) %>% 
+  ggplot() +
+  geom_line(aes(y = parent, x = time_days, color = tag_type))
+
+custom_fill_ <- brewer.pal(9, "Pastel1")[c(2, 3)]
+
+tag_type_facets <- c('GPS' = "1.3g archival GPS tag", 
+                     'PTT' = "1.8g Argos PTT tag")
+
+facets <- 
+  data.frame(parent = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))),
+             label = c("tag retrieved but no data onboard", "tag retrieved but no data onboard", "bird did not return", "bird did not return", rep(NA, 16)),
+             tag_type = c(rep("GPS", 10), rep("PTT", 10))) %>% 
+  mutate(parent = factor(parent,
+                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG")))))
+
+# Define the bin size
+bin_width <- 30
+
+# Bin the data
+binned_data <- 
+  all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
+  mutate(parent = factor(parent,
+                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))) %>%
+  mutate(time_days = as.numeric(time_since_deployment/86400)) %>%
+  mutate(
+    x_bin = cut(time_days, breaks = seq(floor(min(time_days)), ceiling(max(time_days)), by = bin_width))) %>%
+  group_by(parent, x_bin) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  mutate(
+    x_bin_center = as.numeric(sub("\\((.+),.*", "\\1", x_bin)) + bin_width / 2
+  ) %>% 
+  left_join(., tag_date_info %>% dplyr::select(parent, tag_type), by = "parent") %>% 
+  distinct()
+
+tag_data_plot <-
+  # all_BADO_tagging_data %>% 
+  # filter(site == "KK") %>% 
+    binned_data %>% 
+  # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
+  mutate(parent = factor(parent,
+                         levels = rev(c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))),
+         tag_type = factor(as.factor(tag_type), levels = c("PTT", "GPS"))) %>%
+  # mutate(time_days = time_since_deployment/86400) %>% 
+  ggplot(aes(x = x_bin_center, y = parent)) +
+  geom_vline(xintercept = 0, color = "black", size = 0.2) +
+  geom_point(aes(size = count, fill = tag_type), shape = 21, alpha = 1) +
+  scale_size_continuous(range = c(1, 10), 
+                        breaks = c(1, 10, 100, 500), 
+                        labels = c("1", "10", "100", "500"), name = "fixes per month") +
+  # geom_jitter(aes(y = parent, x = time_days, fill = tag_type), shape = 21, alpha = 0.5, height = 0.1, size = 3, color = "grey30") +
+  # theme_minimal() +
+  luke_theme +
+  # geom_point(data = tag_date_info %>% 
+  #              mutate(diff = recapture_date - deployment_date,
+  #                     parent = factor(parent,
+  #                        levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))
+  #                     ),
+  #            aes(x = diff, y = parent)) +
+  geom_text(data = facets %>% mutate(tag_type = factor(as.factor(tag_type), levels = c("PTT", "GPS"))), aes(x = 10, y = parent, label = label), hjust = 0, size = 3, fontface = "italic") +
+  facet_wrap(ncol = 1, "tag_type", scales = "free_y", labeller = as_labeller(tag_type_facets), strip.position = "left") +
+  scale_fill_manual(values = custom_fill_) +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 12),
+        strip.placement = "outside",
+        legend.box.background = element_rect(fill = "white", color = "grey50"),
+        text = element_text(family = "lato"),
+        strip.background = element_rect(fill = "white", colour = "white"),
+        panel.grid.major = element_line(size = 0.25, lineend = "round", colour = "grey90")) +
+  ylab("bird identity") +
+  xlab("days since tag deployment") +
+  guides(fill = "none", size = guide_legend(override.aes = list(color = "black", fill = "grey90"), 
+                                            title.position = "top", title.hjust = 0.5, 
+                                            label.position = "bottom", nrow = 1)) +
+  scale_x_continuous(expand = expansion(add = c(70, 20)))
+  # scale_color_manual(values = custom_fill_)
+
+tag_data_plot
+
+ggsave(plot = tag_data_plot, 
+       filename = "tag_data_time_.png", 
+       path = "tabs_figs/", dpi = 300, 
+       height = 8, width = 8)
+  
+```
+
+### modeling
+```{r}
+df_test <- 
+  all_BADO_tagging_data %>% 
+  filter(site == "KK") %>% 
+  filter(tag_type == "PTT") %>% 
+  mutate(week = as.numeric(strftime(date_local, format = "%V")),
+         year_of_deployment = year(date_local) - year(date_dep) + 1) %>% 
+  mutate(week_ = week * year_of_deployment) %>% 
+  group_by(tagID, week_) %>% 
+  summarise(n_fixes = n(), .groups = 'drop')
+
+ggplot(data = df_test, aes(y = log(n_fixes), x = week_)) +
+  geom_point() +
+  geom_smooth() +
+  facet_grid(tagID ~ .) +
+  scale_x_continuous(limits = c(0, 106))
+  
+# annual_mass_mod <- 
+#   gamm(Mass ~ s(JulianDay, bs = "cc"), 
+#        random = list(SubjectID = ~1), 
+#        data = All_weight_data)
+```
+
+### shiny map
+```{r, eval=FALSE}
+all_BADO_tagging_data_sf <- 
+  all_BADO_tagging_data %>% 
+  # filter(longitude > 100 & latitude < 0) %>% 
+  # filter(tag_type == "GPS" | (tag_type == "PTT" & locationClass %in% c(1, 2, 3))) %>%
+  filter(site == "KK") %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+library(leaflet)
+# install.packages("shiny")
+# install.packages("leaflet.extras")
+library(shiny)
+library(leaflet.extras)
+# Assuming your sf object is called all_BADO_tagging_data_sf
+data <- all_BADO_tagging_data_sf
+
+# Create a color palette
+tagIDs <- unique(data$tagID)
+color_pal <- colorFactor(rainbow(length(tagIDs)), tagIDs)
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Banded Dotterel Tracking Map"),
+  sidebarLayout(
+    sidebarPanel(
+      checkboxGroupInput("tagID", "Select Tag ID(s):", choices = tagIDs, selected = tagIDs),
+      dateRangeInput("dateRange", "Select Date Range:", 
+                     start = min(data$date_local, na.rm = TRUE), 
+                     end = max(data$date_local, na.rm = TRUE)),
+      actionButton("update", "Update Map"),
+      actionButton("select_all", "Select All"),
+      actionButton("deselect_all", "Deselect All")
+    ),
+    mainPanel(
+      leafletOutput("map"),
+      textOutput("noDataMessage")  # Text output for "no data" message
+    )
+  )
+)
+
+# Define server logic
+server <- function(input, output, session) {
+  
+  filtered_data <- reactive({
+    req(input$tagID, input$dateRange)
+    data %>%
+      filter(tagID %in% input$tagID,
+             date_local >= input$dateRange[1],
+             date_local <= input$dateRange[2])
+  })
+  
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%  # Adding base tiles
+      addMeasure(position = "topright", primaryLengthUnit = "kilometers", secondaryLengthUnit = "meters", 
+                 primaryAreaUnit = "sqmeters", secondaryAreaUnit = "sqkilometers")  # Adding the measuring tool
+  })
+  
+  # Observer for "Select All" button
+  observeEvent(input$select_all, {
+    updateCheckboxGroupInput(session, "tagID", selected = tagIDs)
+  })
+  
+  # Observer for "Deselect All" button
+  observeEvent(input$deselect_all, {
+    updateCheckboxGroupInput(session, "tagID", selected = character(0))
+  })
+  
+  observeEvent(input$update, {
+    data <- filtered_data()
+    
+    # Check if there are any filtered data
+    if (nrow(data) == 0) {
+      # Display "no data" message
+      output$noDataMessage <- renderText({
+        "There are no data that match the criteria specified."
+      })
+      
+      # Clear the map if no data
+      leafletProxy("map") %>% clearShapes() %>% clearMarkers()
+      
+    } else {
+      # Hide "no data" message if data exists
+      output$noDataMessage <- renderText({
+        NULL
+      })
+      
+      # Clear any previous map elements
+      leafletProxy("map") %>% clearShapes() %>% clearMarkers()
+      
+      # Split data by tagID
+      data_split <- data %>% group_split(tagID)
+      
+      # Add paths grouped by tagID
+      for (group in data_split) {
+        coords <- st_coordinates(group)
+        leafletProxy("map") %>%
+          addPolylines(lng = coords[, 1], lat = coords[, 2], color = color_pal(group$tagID[1]), group = group$tagID[1])
+      }
+      
+      # Extract coordinates for markers and create popups
+      data_coords <- st_coordinates(data)
+      popups <- paste("<strong>Tag ID:</strong>", data$tagID, "<br>",
+                      "<strong>Date:</strong>", data$date_local)
+      
+      # Compute colors for each marker
+      marker_colors <- color_pal(data$tagID)
+      
+      # Add markers with popups
+      leafletProxy("map") %>%
+        addCircleMarkers(
+          lng = data_coords[, 1],
+          lat = data_coords[, 2],
+          color = marker_colors,
+          popup = popups
+        )
+    }
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+```
+
+### static map
+```{r}
+all_BADO_tagging_data_sf <- 
+  all_BADO_tagging_data %>% 
+  filter(longitude > 100 & latitude < 0) %>% 
+  filter(tag_type == "GPS" | (tag_type == "PTT" & locationClass %in% c(1, 2, 3))) %>%
+  filter(site == "KK") %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+max_dist_location <-
+  all_BADO_tagging_data_sf %>% 
+  # BADO_caps %>% 
+  # sfc_as_cols(., names = c("cap_longitude", "cap_latitude")) %>%
+  # st_drop_geometry() %>%
+  # rename(cap_date = date) %>% 
+  # select(code, cap_date, cap_longitude, cap_latitude) %>% #filter(code %in% c("XX.RR|MX.RG", "XX.RW|MX.LG"))
+  # left_join(bind_rows(BADO_PTTs, BADO_resights), ., by = "code") %>% 
+  sfc_as_cols(., names = c("loc_longitude", "loc_latitude")) %>%
+  st_drop_geometry() %>%
+  dplyr::select(parent, tagID, loc_longitude, loc_latitude, date_local) %>% 
+  mutate(cap_longitude = 173.68,
+         cap_latitude = -42.41) %>% 
+  distinct() %>% 
+  rowwise() %>% 
+  mutate(dist_from_deploy = distHaversine(p1 = matrix(c(loc_longitude, loc_latitude), ncol = 2),
+                                          p2 = matrix(c(cap_longitude, cap_latitude), ncol = 2))/1000) %>%
+  group_by(parent) %>% 
+  mutate(max_dist = max(dist_from_deploy)) %>% 
+  filter(max_dist == dist_from_deploy) %>% 
+  distinct() %>% 
+  arrange(desc(max_dist))
+
+BADO_curve_plot_df <- 
+  max_dist_location %>% 
+  filter(max_dist > 100) %>% 
+  dplyr::select(parent, date_local, cap_longitude, cap_latitude) %>% 
+  rename(longitude = cap_longitude,
+         latitude = cap_latitude) %>% 
+  mutate(data_type = "capture") %>% 
+  bind_rows(., max_dist_location %>% 
+                dplyr::select(parent, date_local, loc_longitude, loc_latitude) %>% 
+                rename(longitude = loc_longitude,
+                      latitude = loc_latitude) %>% 
+                mutate(data_type = "movement")) %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+# define projection
+# lcc_params <- st_crs("+proj=lcc +lat_1=-36 +lat_2=-36 +lat_0=-36 +lon_0=162 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
+lcc_params <- st_crs("+proj=lcc +lat_1=-42.41 +lat_2=-42.41 +lat_0=-42.41 +lon_0=173.68 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
+
+Kaikoura <- 
+  data.frame(longitude = 173.68, latitude = -42.41) %>% 
+  st_as_sf(., 
+           coords = c("longitude", "latitude"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
+  st_transform(lcc_params)
+
+# get political boundaries of NZ and AU, bind together, crop to region of interest, and project
+nz_bound <- gisco_get_countries(country = "New Zealand", resolution = "03")
+# au_bound <- gisco_get_countries(country = "Australia", resolution = "03")
+# nz_au_bound <- st_union(nz_bound, au_bound)
+nz_bound_crop <- 
+  st_crop(nz_bound, c(xmin = 165, ymin = -48, xmax = 179, ymax = -33)) %>% 
+  st_transform(lcc_params)
+
+# au_water <-
+#   st_read("/Users/leberhart/Documents/Academic/New_Zealand/banded_dotterels/data/spatial/NZ_map/AUS_wat/AUS_water_areas_dcw.shp") %>%
+#   # st_transform(lcc_params) %>% 
+#   filter(HYC_DESCRI == "Perennial/Permanent")
+
+nz_water <-
+  st_read("/Users/leberhart/Documents/Academic/New_Zealand/banded_dotterels/data/spatial/NZ_map/NZL_wat/NZL_water_areas_dcw.shp") %>%
+  # st_transform(lcc_params) %>% 
+  filter(HYC_DESCRI == "Perennial/Permanent")
+
+nz_water <- 
+  nz_water %>% 
+  st_transform(lcc_params)
+
+# nz_au_water_crop <- 
+#   st_crop(nz_au_water, c(xmin = 140, ymin = -46, xmax = 180, ymax = -30)) %>% 
+#   st_transform(lcc_params)
+
+# as.data.frame(nz_rivers)
+# 
+# mapview(nz_au_water)
+
+# extract the DEM of the region of interest and project
+nz_dem <- elevatr::get_elev_raster(locations = nz_bound_crop, z = 6, clip = "locations")
+# plot(nz_dem_proj)
+# nz_au_dem <- raster::raster("/Users/leberhart/Documents/Academic/New_Zealand/banded_dotterels/data/spatial/NZ_map/DEM_zoom_6.tif")
+nz_dem <- terra::rast(nz_dem)
+
+# writeRaster(nz_au_dem, "data/spatial/NZ_map/DEM_zoom_6.tif")
+nz_dem_proj <- terra::project(nz_dem, terra::crs(nz_bound_crop))
+mdt <- nz_dem_proj
+
+# convert the raster into a data.frame of xyz
+mdtdf <- as.data.frame(mdt, xy = TRUE)
+names(mdtdf)[3] <- "alt"
+
+# create a hillshade of the region of interest
+# estimate the slope
+sl <- terra::terrain(mdt, "slope", unit = "radians")
+
+# estimate the aspect or orientation
+asp <- terra::terrain(mdt, "aspect", unit = "radians")
+
+# pass multiple directions to shade()
+hillmulti <- map(c(270, 15, 60, 330), function(dir){ 
+  terra::shade(sl, asp, 
+        angle = 45, 
+        direction = dir,
+        normalize= TRUE)}
+)
+
+# create a multidimensional raster and reduce it by summing up
+hillmulti <- terra::rast(hillmulti) %>% sum()
+
+# convert the hillshade to xyz
+hillmultidf <- as.data.frame(hillmulti, xy = TRUE)
+# install.packages("ggblend")
+# install.packages("rnaturalearth")
+# install.packages("elevatr")
+# install.packages("tidyterra")
+# install.packages("ggnewscale")
+# install.packages("ggsn")
+
+bbox <- st_bbox(BADO_curve_plot_df)
+
+# Split the data into individual parent groups
+parent_groups <- BADO_curve_plot_df %>% group_by(parent) %>% mutate(n_points = n()) %>% filter(n_points > 1)
+
+# Initialize an empty list to store the lines
+curved_lines <- list()
+
+# Iterate over each parent group to create the curved lines
+for (parent in unique(parent_groups$parent)) {
+  parent_data <- filter(parent_groups, parent == !!parent)
+  parent_data <- arrange(parent_data, date_local)
+  
+  # Create curved lines for consecutive points
+  for (i in 1:(nrow(parent_data) - 1)) {
+    start <- st_coordinates(parent_data$geometry[i])
+    end <- st_coordinates(parent_data$geometry[i + 1])
+    
+    curved_lines[[length(curved_lines) + 1]] <- data.frame(
+      x = c(start[1], end[1]),
+      y = c(start[2], end[2]),
+      parent = parent
+    )
+  }
+}
+
+# Combine all curved lines into a single data frame
+curved_lines_df <- 
+  do.call(rbind, curved_lines) %>% 
+  st_as_sf(.,
+           coords = c("x", "y"),
+           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>%
+  st_transform(lcc_params) %>% 
+  sfc_as_cols(., names = c("t_x", "t_y")) %>%
+  st_drop_geometry()
+
+RWLG_curve <- curved_lines_df %>% filter(parent == "RWLG")
+RBBR_curve <- curved_lines_df %>% filter(parent == "RBBR")
+RRRG_curve <- curved_lines_df %>% filter(parent == "RRRG")
+RBRL_curve <- curved_lines_df %>% filter(parent == "RBRL")
+RBOY_curve <- curved_lines_df %>% filter(parent == "RBOY")
+
+# Plot the curved lines using ggplot2
+ggplot() +
+  geom_sf(data = BADO_curve_plot_df, aes(geometry = geometry, color = parent), size = 2) +
+  geom_curve(data = RWLG_curve, aes(x = t_x[1], y = t_y[1], xend = t_x[2], yend = t_y[2]),
+             curvature = 0.2, size = 1, arrow = arrow(length = unit(0.2, "cm"))) +
+  theme_minimal() +
+  labs(title = "Curved Paths Between Consecutive Points for Each Parent",
+       x = "Longitude",
+       y = "Latitude")
+
+# Load the graticules dataset
+graticules <- 
+  st_graticule(ndiscr = 50) %>% 
+  st_transform(lcc_params) %>%
+  st_geometry
+
+data("hypsometric_tints_db")
+nz_pal <- 
+  hypsometric_tints_db %>% 
+  filter(pal == "wiki-2.0_hypso") %>%
+  # filter(pal == "c3t1") %>%
+
+  mutate(limit = seq(from = 0, to = 3035, 3035/(nrow(.)-1))) %>% 
+  mutate(hex = ifelse(limit > 1500, "#FFFFFF", hex))
+
+# "#ACD0A5" "#94BF8B" "#A8C68F" "#BDCC96" "#D1D7AB" "#E1E4B5" "#EFEBC0" "#E8E1B6" "#DED6A3" "#D3CA9D"
+# "#CAB982" "#C3A76B" "#B9985A" "#AA8753" "#AC9A7C" "#BAAE9A" "#CAC3B8" "#E0DED8" "#F5F4F2" "#F5F4F2"
+
+# my_lims <- terra::minmax(mdt) %>% as.integer() + c(-2, 2)
+# my_lims[1] = 0
+# map
+m <-
+  ggplot() +
+  geom_sf(data = nz_bound_crop, fill = "white", color = "white") +
+  list(
+    geom_raster(data = hillmultidf,
+                aes(x, y, fill = sum),
+                show.legend = FALSE,
+                alpha = .5),
+    scale_fill_distiller(palette = "Greys"),
+    new_scale_fill(),
+    geom_raster(data = mdtdf,
+                aes(x, y, fill = alt),
+                alpha = 0.5),
+    scale_fill_gradientn(
+    colors = nz_pal$hex,
+    values = scales::rescale(nz_pal$limit),
+    limit = range(nz_pal$limit)
+  )
+    # scale_fill_hypso_tint_c(palette =
+    #                           # "gmt_globe_hypso",
+    #                         # "usgs-gswa2",
+    #                           # "wiki-2.0_hypso",
+    #                         # "dem_screen",
+    #                         "dem_print",
+    # 
+    #                         # "utah_1",
+    # 
+    # limits = my_lims
+    #                         # breaks = nz_pal$limit
+    #                         )
+  ) %>% 
+  blend("multiply") +
+  geom_sf(data = nz_water, color = NA, fill = "#698ecf", alpha = 0.85) +
+  ## geom_sf(data = BADO_curve_plot_df,
+  ##         aes(color = code), alpha = 0.5) +
+  # geom_path(data = BADO_curve_plot_df,
+  #           aes(x = st_coordinates(geometry)[, 1], y = st_coordinates(geometry)[, 2], group = parent),
+  #           color = "grey40", alpha = 1,
+  #           arrow = arrow(angle = 25, ends = "last", type = "closed", length = unit(0.1, "inches"))) +
+  # geom_curve(data = curved_lines_df, aes(x = x[1], y = y[1], xend = x[2], yend = y[2], color = parent),
+  #            curvature = 0.2, size = 1, arrow = arrow(length = unit(0.2, "cm"))) +
+  geom_curve(data = RWLG_curve, aes(x = t_x[1], y = t_y[1], xend = t_x[2], yend = t_y[2]),
+             curvature = 0.2, linewidth = 0.5, color = "grey40") +#, arrow = arrow(length = unit(0.2, "cm")), color = "blue") +
+  geom_curve(data = RBBR_curve, aes(x = t_x[1], y = t_y[1], xend = t_x[2], yend = t_y[2]),
+           curvature = 0.25, linewidth = 0.5, color = "grey40") +#, linetype = "dashed", color = "grey40") +#, arrow = arrow(length = unit(0.2, "cm")), color = "black", linetype = "dashed") +
+  geom_curve(data = RRRG_curve, aes(x = t_x[1], y = t_y[1], xend = t_x[2], yend = t_y[2]),
+           curvature = 0.15, linewidth = 0.5, color = "grey40") +#, arrow = arrow(length = unit(0.2, "cm")), color = "red") +
+  geom_curve(data = RBRL_curve, aes(x = t_x[1], y = t_y[1], xend = t_x[2], yend = t_y[2]),
+           curvature = 0.15, linewidth = 0.5, color = "grey40") +#, arrow = arrow(length = unit(0.2, "cm")), color = "green") +
+  geom_curve(data = RBOY_curve, aes(x = t_x[1], y = t_y[1], xend = t_x[2], yend = t_y[2]),
+           curvature = 0.2, linewidth = 0.5, color = "grey40") +#, arrow = arrow(length = unit(0.2, "cm")), color = "orange") +
+  # geom_sf(data = world_polygons, alpha = 0, color = "gray40") +
+      geom_point(data = BADO_curve_plot_df %>% filter(parent %in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY")) %>% group_by(parent) %>% arrange(date_local) %>% slice(2),
+            aes(x = st_coordinates(geometry)[, 1], y = st_coordinates(geometry)[, 2], group = parent), 
+            size = 3, shape = 21, fill = "grey40", stroke = 0.8, color = "grey40") +
+  geom_point(data = Kaikoura, aes(x = st_coordinates(geometry)[, 1], y = st_coordinates(geometry)[, 2]), 
+            size = 5, shape = 21, fill = "grey40", stroke = 0.8, color = "grey40") +
+  guides(fill = guide_colorsteps(barwidth = 20,
+                                 barheight = .5,
+                                 title.position = "right")) +
+  labs(fill = "m", x = "Longitude", y = "Latitude") +
+  coord_sf(xlim = c(bbox["xmin"] - 650000, bbox["xmax"] + 450000),
+           ylim = c(bbox["ymin"] - 550000, bbox["ymax"] + 850000),
+           crs = lcc_params) +
+  luke_theme +
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(), 
+        panel.border = element_blank(),
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(color = NA, fill = "transparent")) #+
+  # ggsn::scalebar(mdtdf %>% rename(long = x, lat = y), #location = "bottomright",
+  #                x.min = 170.38, x.max = 170.40,
+  #                y.min = -40,  y.max = -40,
+  #                border.size = 0.2, st.bottom = FALSE,
+  #                dist = 250, height = 0.05, st.dist = 0.05, st.color = "black", st.size = 3,
+  #                transform = FALSE,
+  #                model = "WGS84",
+  #                dist_unit = "km")
+m
+install.packages("metR")
+library(metR)
+library(scales)
+library(patchwork)
+tag_data_plot + m + plot_layout(widths = c(3, 1), heights = c(2, 2))
+
+ggsave(plot = m, filename = "map_of_KK_migrations.png", path = "tabs_figs/", dpi = 300,
+       height = 8, width = 8, units = "in")
+
+# all_BADO_tagging_data_sf %>% 
+#           filter(parent == "RBWR") %>% 
+#           mutate(time_days = time_since_deployment/86400) %>% 
+#           filter(time_days > 200)
+# 
+# mapview(all_BADO_tagging_data_sf %>% dplyr::select(tagID, date_local))
+```
+
+### resident birds
+```{r}
+#### PTTs --------
+# #"RBOG", #"RBGB", #"RROW", #"RBWO", #"RRGO", #"RRRG", #"RBOY", #"RBWR", #"RBRL", #"RWLG"
+
+# unknown PTTs
+# "RBGB", "RROW", "RBWR"
+
+# migrant PTTs
+# "RWLG", "RRRG", "RBRL", "RBOY"
+
+# Resident PTTS
+# RRGO photographed latest 2023-04-14, reported by Ailsa 2022-05-19 & RRGO latest fix 2023-04-27
+# RBOG listed by Ailsa as resident in data for Bashar
+# RBWO latest fix 2023-04-28
+
+#### GPSs ---------
+# #"RLYL", #"RWBG", #"RLYR", #"RRBR", #"RBBY", #"RWBY", #"RBBR", #"RRLR", #"RWLB", #"RRYY"
+  
+# migrant GPS
+# "RBBR"
+  
+# resident GPS
+# RLYL photographed latest 2023-04-05 (maybe resident), listed by Ailsa as resident
+# RBBY seen 2023-03-15 and 2021-08-02 & fixes over all winter (latest 2022-07-09
+# RRLR seen 2023-03-15 and 2021-08-06
+# RWLB seen 2022-03-07
+# RWBY fixes over all winter (latest 2022-07-02)
+# RRYY photographed latest 2022-04-02, reported by Ailsa 2022-06-11
+  
+# did not return
+# "RLYR", "RRBR"
+  
+# unknown GPS
+# "RWBG"
+
+# all_BADO_tagging_data_sf_dist %>% 
+#   filter(dist_from_deploy > 100) %>% 
+#   arrange(parent, date_local) %>% 
+#   mutate(year = year(date_local)) %>% 
+#   group_by(year, parent) %>% 
+#   dplyr::select(parent, tagID, date_local, year) %>% 
+#   slice_max(date_local) %>% 
+#   distinct()
+  
+  # slice_min(date_local)
+
+# # winter_obs_2021 <-
+#   read_excel(here("data/2021_BDot ethics trial_Ailsa 20220612.xlsx"),
+#                      sheet = "Observations",
+#                      col_types = "text") %>%
+#   mutate(Date = as.Date(as.POSIXct(as.numeric(Date) * 86400, origin = "1899-12-30", tz = "UTC"))) %>% 
+#   mutate(month = month(Date)) %>%
+#   filter(Bird == "RL/YL") %>% 
+#   dplyr::select(Bird, Tag, Date, month, Notes) %>% 
+#   distinct() #%>% 
+#   mutate(parent = gsub("/", "", Bird)) %>% 
+#   filter(parent %in% c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RBWR", "RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RRLR", "RRYY", "RWLB")) %>% 
+#   filter(month < 8 & month > 3)
+#   
+# all_BADO_tagging_data %>% 
+#   filter(month(date_local) > 3 & month(date_local) < 8) %>% 
+#   filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY")) %>% 
+#   # dplyr::select(tagID, parent, longitude, latitude) %>% 
+#   bind_rows(., pre_2024_gps_data_ %>%
+#               filter(month(date_local) > 2 & month(date_local) < 8) %>%
+#               filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY"))) %>%
+#   mutate(parent_tag = paste(parent, tag_type, sep = "_")) %>% 
+#   st_as_sf(coords = c("longitude", "latitude"), 
+#            crs = 4326) %>% 
+#   mapview(zcol = "parent_tag")
+# 
+# all_BADO_tagging_data %>% 
+#   filter(month(date_local) > 3 & month(date_local) < 8) %>% 
+#   filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY")) %>% 
+#   mutate(parent_tag = paste(parent, tag_type, sep = "_")) %>% 
+#   select(parent, tag_type, date_local) %>% distinct()
+```
+
+
+### predicted locations
+```{r}
+# install.packages("aniMotum", 
+#                  repos = c("https://cloud.r-project.org",
+#                  "https://ianjonsen.r-universe.dev"),
+#                  dependencies = TRUE)
+library(aniMotum)
+```
+
+```{r}
+argos_pre2024 <- 
+  pre_2024_tag_data %>% 
+    rename(id = tagID,
+         date = date_local,
+         lc = locationClass,
+         lon = longitude,
+         lat = latitude) %>%
+  dplyr::select(id, date, lc, lon, lat)
+
+#### fit state-space model using aniMotum ----
+# If you have Argos location data and your goal is to infer changes in movement 
+# behaviour along tracks then estimating locations and move persistence 
+# simultaneously within a state-space model is the preferred approach, as 
+# location uncertainty is accounted for in the move persistence estimates
+
+mp_loop_pred_fun <- function(argos_data, time_step = 24, velocity_max = 0.05){
+  ids <- argos_data %>% pull(id) %>% unique()
+  
+  fit_df <- as.data.frame(NULL)
+  
+  for(i in 1:length(ids)){
+    fit_mp <- fit_ssm(argos_data %>% filter(id == ids[i]), 
+                      vmax = velocity_max, 
+                      model = "mp", 
+                      # distlim = c(0, 50),
+                      time.step = time_step,
+                      control = ssm_control(verbose = 0),
+                      map = list(psi = factor(NA)))
+    fit_mp_pred_trans_df <- 
+      fit_mp$ssm[[1]]$predicted %>% 
+      sf::st_transform(st_crs("+proj=longlat +datum=WGS84 +no_defs")) %>% 
+      sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+      st_drop_geometry()
+    fit_df <- bind_rows(fit_df, fit_mp_pred_trans_df)
+  }
+  return(fit_df)
+}
+
+mp_pred <- 
+  mp_loop_pred_fun(argos_data = argos_pre2024) %>% 
+  # left_join(., 
+  #           argos_pre2024 %>% 
+  #             dplyr::select(id, site) %>% 
+  #             distinct() %>% 
+  #             mutate(id = as.character(id)), by = "id") %>% 
+  remove_rownames()
+
+mp_loop_fit_fun <- function(argos_data, time_step = 24, velocity_max = 0.05){
+  ids <- argos_data %>% pull(id) %>% unique()
+  
+  fit_df <- as.data.frame(NULL)
+  
+  for(i in 1:length(ids)){
+    fit_mp <- fit_ssm(argos_data %>% filter(id == ids[i]), 
+                      vmax = velocity_max, 
+                      model = "mp", 
+                      # distlim = c(0, 50),
+                      time.step = time_step,
+                      control = ssm_control(verbose = 0),
+                      map = list(psi = factor(NA)))
+    fit_mp_pred_trans_df <- 
+      fit_mp$ssm[[1]]$fitted %>% 
+      sf::st_transform(st_crs("+proj=longlat +datum=WGS84 +no_defs")) %>% 
+      sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+      st_drop_geometry()
+    fit_df <- bind_rows(fit_df, fit_mp_pred_trans_df)
+  }
+  return(fit_df)
+}
+
+mp_fit <- 
+  mp_loop_fit_fun(argos_data = argos_pre2024) %>% 
+  left_join(.,
+            pre_2024_tag_data %>%
+              dplyr::select(tagID, parent) %>%
+              distinct() %>%
+              rename(id = tagID), by = "id") %>%
+  remove_rownames() #%>% 
+  # mutate(tmp = ifelse(id == "234681" & date < as.Date("2022-12-16"), 1, 0)) %>% 
+  # filter(tmp == 0) %>% 
+  # dplyr::select(-tmp)
+
+# winter fixes in Kaikoura (residents)
+mp_fit %>% 
+  filter(month(date) > 2 & month(date) < 8) %>% 
+  filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY")) %>% 
+  dplyr::select(id, longitude, latitude) %>% 
+  rename(tagID = id) %>% 
+  bind_rows(., pre_2024_gps_data_ %>% 
+              filter(month(date_local) > 2 & month(date_local) < 8) %>% 
+              filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY"))) %>% 
+  st_as_sf(coords = c("longitude", "latitude"), 
+           crs = 4326) %>% 
+  mapview(zcol = "tagID")
+
+# summer fixes in Kaikoura (all)
+summer_KK_data <- 
+  mp_fit %>% 
+  filter(month(date) <= 2 | month(date) >= 8) %>% 
+  # filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY")) %>% 
+  dplyr::select(id, longitude, latitude) %>% 
+  rename(tagID = id) %>% 
+  bind_rows(., pre_2024_gps_data_ %>% 
+              filter(month(date_local) <= 2 | month(date_local) >= 8) %>% 
+              dplyr::select(tagID, longitude, latitude) #%>% 
+              # filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY"))
+            ) %>%
+  filter(longitude >= min_lon & longitude <= max_lon)
+  st_as_sf(coords = c("longitude", "latitude"), 
+           crs = 4326)
+
+# Desired number of cells along each dimension
+desired_cells <- 100  # Adjust as needed
+
+# Calculate resolution
+res_x <- (ext@xmax - ext@xmin) / desired_cells
+res_y <- (ext@ymax - ext@ymin) / desired_cells
+
+# Use the smaller resolution to ensure square cells
+res <- min(res_x, res_y)
+print(res)
+
+sp_points <- as(summer_KK_data_crop, "Spatial")
+ext <- raster::extent(sp_points)
+res <- 0.001  # Define the resolution, adjust as needed
+r <- raster::raster(res = res, crs = proj4string(sp_points))
+raster::extent(r) <- ext
+r_density <- raster::rasterize(sp_points, r, fun = "count", background = 0)
+plot(r_density, main = "Point Density")
+
+mapview(r_density, layer.name = "Point Density")
+
+# Transform the CRS of the coastline to EPSG:4326 (WGS84)
+# nz_coastline <- st_transform(nz_coastline, crs = 4326)
+
+# Create hexagon grid (this can also be done using `sf`)
+hex_grid <- st_make_grid(summer_KK_data_crop, cellsize = 0.01)  # Define `cellsize` based on desired resolution
+
+# Check if hexes intersect with the land (coastline)
+land_hexes <- hex_grid[st_intersects(hex_grid, nz_bound, sparse = FALSE),]
+
+
+# Create the hexbin plot
+ggplot() +
+  # Add the base map
+  # ggmap(KK_map_transparent) +
+  # Add hexbin layer
+  # geom_hex(data = summer_KK_data, aes(x = longitude, y = latitude), bins = 30, alpha = 0.6) +  # Adjust bins
+  geom_sf(data = land_hexes, aes(fill = ..count..), color = "white", alpha = 0.6) +
+
+  # Add coastline layer
+  geom_sf(data = nz_bound, fill = "gray", color = "black", size = 0.5, alpha = 0.5) +
+  # Title and labels
+  labs(title = "Heatmap of Point Density with Coastline", x = "Longitude", y = "Latitude") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_x_continuous(limits = c(min_lon, max_lon)) +
+  scale_y_continuous(limits = c(min_lat, max_lat))
+
+min_lon <- 173.5
+max_lon <- 173.75
+min_lat <- -42.46
+max_lat <- -42.32
+bbox <- st_bbox(c(xmin = min_lon, xmax = max_lon, ymin = min_lat, ymax = max_lat), crs = st_crs(4326))
+summer_KK_data_crop <- st_crop(summer_KK_data, bbox)
+
+mapview(summer_KK_data_crop, zcol = "tagID")
+
+# determine the spatial center of the data for plotting study site
+KK_sf_centroid <- 
+  summer_KK_data_crop %>%
+  summarize(geometry = st_union(geometry)) %>% 
+  st_centroid %>%
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  st_drop_geometry()
+
+### map with satellite imagery of Kaikoura
+# extract Google Maps satellite imagery for the study site
+# note you'll need to register for a API key to run this "has_google_key() should be TRUE"
+KK_map <- get_map(location = c(KK_sf_centroid$lon + 0.005, KK_sf_centroid$lat), zoom = 13, 
+                    maptype = 'satellite', 
+                    source = "google", 
+                    api_key = api_secret)
+
+# make the imagery more transparent
+KK_map_attributes <- attributes(KK_map)
+KK_map_transparent <- matrix(adjustcolor(KK_map,
+                                           alpha.f = 0.7), 
+                                    nrow = nrow(KK_map))
+attributes(KK_map_transparent) <- KK_map_attributes
+ggmap(KK_map_transparent)
+
+nz_bound <- gisco_get_countries(country = "New Zealand", resolution = "1")
+nz_bound_crop <- 
+  st_crop(nz_bound, c(xmin = min_lon, ymin = max_lat, xmax = max_lon, ymax = max_lat)) 
+
+#### calculate distances ----
+# specify coordinate columns
+coordinates(mp_fit) <- c("longitude","latitude")
+
+# define spatial projection as WGS84
+proj4string(mp_fit) <- CRS("+init=epsg:4326")
+
+# make a spatial trajectory object of each animal's encounter history
+tr_fit <- 
+  as.ltraj(xy = sp::coordinates(mp_fit),
+           date = mp_fit$date,
+           id = mp_fit$id)
+
+# convert the trajectory object back to a dataframe, rename columns, and
+# calculate the cumulative distance traveled over the observation
+tr_fit_ <- 
+  ld(tr_fit) %>% 
+  dplyr::rename(distance = dist,
+                dispersion = R2n,
+                cardinal_angle = abs.angle,
+                relative_angle = rel.angle) %>% 
+  group_by(id) %>% 
+  mutate(cum_distance = cumsum(distance))
+
+tr_fit_lag <- 
+  tr_fit_ %>% 
+  # calculate the temporal lag between observations
+  group_by(id) %>% 
+  mutate(obs_diff = date - lag(date),
+         origin_x = x[which.min(date)],
+         origin_y = y[which.min(date)])
+
+# for each bird calculate the daily distance from origin
+tr_fit_lag$distance_origin <- 
+  sapply(1:nrow(tr_fit_lag), function(i)
+    spDistsN1(as.matrix(tr_fit_lag[i, c("x", "y")]), 
+              as.matrix(tr_fit_lag[i, c("origin_x", "origin_y")]), 
+              longlat = TRUE))
+
+# transform the distance metrics to meters
+tr_fit_lag_clean <- 
+  tr_fit_lag %>% 
+  ungroup() %>% 
+  as.data.frame() %>% 
+  mutate(distance = distance * 100000,
+         distance_origin = distance_origin * 1000,
+         cum_distance = cum_distance * 100000) %>% 
+  left_join(., 
+            argos_dsp %>% 
+              dplyr::select(id, site) %>% 
+              distinct() %>% 
+              mutate(id = as.character(id)), by = "id") %>% 
+  mutate(site = factor(site, levels = c("viliama", "el_yeso")))
+
+# check the distribution of distances
+hist(log(tr_fit_lag_clean$distance))
+range(tr_fit_lag_clean$distance, na.rm = TRUE)
+boxplot.stats(tr_fit_lag_clean$distance)
+
+# specify the facet labels for each species
+site.labs <- c('el_yeso' = "El Yeso", 
+               'viliama' = "Lagunas di Vilama")
+
+tr_fit_lag_clean %>% 
+  group_by(site, id) %>% 
+  summarise(max_dist = max(distance_origin)) %>% 
+  arrange(site, max_dist)
+
+M1_plot <-
+  ggplot() +
+  luke_theme +
+  geom_line(data = tr_fit_lag_clean, 
+            aes(x = date, y = distance_origin/1000, group = id), color = "white",
+            alpha = 1, lwd = 0.5) +
+  facet_grid(. ~ site, labeller = as_labeller(site.labs)) +
+  scale_y_continuous(limits = c(0, 150)) +
+  scale_x_datetime(date_labels = "%B", expand = c(0.01, 0.01), date_breaks = "2 months") +
+  ylab("Distance from\norigin (km)") +
+  theme(legend.position = "none",
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(color = NA, fill = "transparent"),# '#576373'),
+        strip.text = element_blank(),
+        strip.background = element_rect(fill = 'transparent', color = NA),
+        text = element_text(family = "Franklin Gothic Book"),
+        axis.title.y = element_text(size = 12, colour = "white"),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 10, angle = 45, vjust = 1, hjust = 1, color = "white"),
+        axis.text.y = element_text(size = 10, colour = "white"),
+        # panel.grid.major = element_line(linewidth = 0.5, alpha = 0.5),
+        panel.grid.minor = element_line(size = 0.05, colour = "grey80"),
+        panel.grid.major = element_line(size = 0.05, colour = "grey80"),
+        axis.ticks = element_blank(),
+        panel.spacing = unit(1.5, "lines")) 
+```
+
+### distance moved plot
+```{r}
+all_BADO_tagging_data_sf_dist <- 
+  all_BADO_tagging_data_sf %>% 
+  # BADO_caps %>% 
+  # sfc_as_cols(., names = c("cap_longitude", "cap_latitude")) %>%
+  # st_drop_geometry() %>%
+  # rename(cap_date = date) %>% 
+  # select(code, cap_date, cap_longitude, cap_latitude) %>% #filter(code %in% c("XX.RR|MX.RG", "XX.RW|MX.LG"))
+  # left_join(bind_rows(BADO_PTTs, BADO_resights), ., by = "code") %>% 
+  sfc_as_cols(., names = c("loc_longitude", "loc_latitude")) %>%
+  st_drop_geometry() %>%
+  dplyr::select(parent, tagID, loc_longitude, loc_latitude, date_local, time_since_deployment) %>% 
+  mutate(cap_longitude = 173.68,
+         cap_latitude = -42.41) %>% 
+  distinct() %>% 
+  rowwise() %>% 
+  mutate(dist_from_deploy = distHaversine(p1 = matrix(c(loc_longitude, loc_latitude), ncol = 2),
+                                          p2 = matrix(c(cap_longitude, cap_latitude), ncol = 2))/1000)
+
+ggplot(data = all_BADO_tagging_data_sf_dist,
+       aes(x = date_local, y = dist_from_deploy, color = tagID)) +
+  geom_line()
+
+
+```
+
+
+```{r}
+KK_caps %>% 
+  filter(date_local > recapture_date)
+
+BADO_PTTs_all <-
+  BADO_PTTs %>% 
+  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+  st_drop_geometry() %>% 
+  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, "00:00:00", sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>% 
+  mutate(date_local = as.POSIXct(with_tz(ymd_hms(locationDate, tz = 'UTC'), 'Pacific/Auckland')),
+         site = "KK") %>%
+  rename(id = tagID,
+         lc = locationClass,
+         field_sex = sex) %>% 
+  mutate(time_since_deployment = date_local - date_dep) %>% 
+  dplyr::select(id, ring, field_sex, site, date_local, lc, lon, lat, volt, temp, time_since_deployment) %>% arrange(desc(date_local))
+  bind_rows(., argos_data)
+
+ggplot(data = BADO_PTTs_all) +
+  geom_line(aes(x = time_since_deployment, y = volt, group = id), alpha = 0.5) +
+  facet_wrap("site", nrow = 2)
+
+voltage_lmer <- 
+  lmer(scale(volt) ~ scale(time_since_deployment) + (1|id) + (1|site), data = argos_data)
+
+tidy_voltage_lmer <-
+  tidy(voltage_lmer, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+
+summary(voltage_lm)
+tidy
+plot(allEffects(voltage_lm))
+```
+
 
 
 ```{r}
@@ -2072,911 +3813,269 @@ tag_type_p_plot
 
 ```
 
-
-# Movements of tagged birds
-```{r}
-# function to read tagging data
-import_plover_tag_spatial_fun <- 
-  function(data_loc, tag_ID, projection,
-           time_zone = "America/Mazatlan",
-           tag_model, bird_ID, bird_sex, bird_code, 
-           species, population, n_slice){
-    
-    if(tag_model == "nanoFix-mini")
-    {
-      # read data file and extract data
-      Tag <- 
-        read.table(sep = ",", skip = 5, file = data_loc) %>% 
-        
-        # assign column names
-        `colnames<-` (c("day", "month", "year", "hour", "minute", "second", "unknown_col", 
-                        "satellites", "latitude", "longitude", "elevation", 
-                        "clock_offset", "accuracy_indicator", "battery")) %>% 
-        
-        mutate(
-          # make a fix number column
-          fix_number = str_pad(row.names(.), 2, pad = "0"),
-          
-          # make a timestamp column
-          timestamp = paste(paste(year, month, 
-                                  day, sep = "-"), 
-                            paste(hour, minute, 
-                                  second, sep = ":"), sep = " ")) %>% 
-        mutate(
-          # convert to a useable POSIX time/date string
-          timestamp = as.POSIXct(strptime(as.character(timestamp), 
-                                          format = "%y-%m-%d %H:%M:%S"), 
-                                 tz = time_zone),
-          
-          # assign name of tag
-          tag_ID = tag_ID,
-          
-          # make a simplified version of the time sting
-          timestamp_simple = as.Date(str_sub(as.character(timestamp), 
-                                             start = 1, end = 10), 
-                                     format = "%Y-%m-%d")) %>% 
-        
-        # remove observations without a reliable location
-        dplyr::filter(latitude != 0 & !is.na(latitude)) %>%
-        
-        # remove observations without a reliable location
-        dplyr::filter(timestamp != 0 & !is.na(timestamp)) %>%
-        
-        # names() %>% 
-        # as.data.frame()
-        
-        dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
-                      satellites, latitude, longitude, elevation, battery) %>% 
-        
-        mutate(# assign bird ring
-          ring = bird_ID,
-          
-          # assign sex of bird
-          sex = bird_sex, 
-          
-          # assign bird color combo
-          code = bird_code,
-          
-          # assign bird species
-          species = species,
-          
-          # assign bird population
-          population = population,
-          
-          satellites = as.character(satellites)) %>% 
-        
-        # make the dataframe a SpatialPointsDataFrame and define coordinates
-        `coordinates<-` (c("longitude", "latitude")) %>% 
-        
-        # define projection
-        `proj4string<-` (projection)
-      
-      # output result
-      Tag
-    }
-    else if(tag_model == "PinPoint-10"){
-      if(n_slice == 0){
-        # read data file and extract data
-        Tag <- 
-          read.table(sep = "", na.strings = "", file = data_loc, fill = TRUE,
-                     stringsAsFactors = FALSE, header = TRUE) %>% 
-          
-          mutate(
-            # extract the temporal information from the string
-            year = paste0("20", str_sub(string = RTC.date, start = 1, end = 2)),
-            month = paste0(str_sub(string = RTC.date, start = 4, end = 5)),
-            day = paste0(str_sub(string = RTC.date, start = 7, end = 8)),
-            hour = paste0(str_sub(string = RTC.time, start = 1, end = 2)),
-            minute = paste0(str_sub(string = RTC.time, start = 4, end = 5)),
-            second = paste0(str_sub(string = RTC.time, start = 7, end = 8))
-          ) %>% 
-          
-          mutate(
-            # Merge the time and date columns together to formulate the time stamp for a given row
-            timestamp = ISOdate(year = year, month = month, day = day, 
-                                hour = hour, min = minute, sec = second, 
-                                tz = time_zone),
-            
-            # Tag$datetime[nrow(Tag)] = Tag$datetime[nrow(Tag)] + 8 * 60 * 60,
-            # 
-            # Tag$hour[nrow(Tag)] = as.character(as.numeric(Tag$hour[nrow(Tag)]) + 8),
-            # 
-            # timestamp = paste0(year, "-", month, "-", day, " ", hour, ":", minute, ":", second)
-            
-            timestamp_simple = as.Date(str_sub(as.character(timestamp), 
-                                               start = 1, end = 10), 
-                                       format = "%Y-%m-%d"),          
-            # make a fix number column
-            fix_number = str_pad(row.names(.), 2, pad = "0"),
-            
-            # assign name of tag
-            tag_ID = tag_ID
-          ) %>% 
-          
-          # remove observations without a reliable location
-          dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
-                        Sats, Latitude, Longitude, Altitude.m.) %>% 
-          
-          `colnames<-` (tolower(names(.))) %>% 
-          
-          rename(satellites = sats,
-                 tag_ID = tag_id,
-                 elevation = altitude.m.) %>% 
-          
-          mutate(battery = NA,
-            # assign bird ring
-            ring = bird_ID,
-            
-            # assign sex of bird
-            sex = bird_sex, 
-            
-            # assign bird color combo
-            code = bird_code,
-            
-            # assign bird species
-            species = species,
-            
-            # assign bird population
-            population = population,
-            
-            satellites = as.character(satellites)) %>% 
-          
-          # remove observations without a reliable location
-          filter(latitude != 0 | !is.na(latitude)) %>% 
-          
-          # make the dataframe a SpatialPointsDataFrame and define coordinates
-          `coordinates<-` (c("longitude", "latitude")) %>% 
-          
-          # define projection
-          `proj4string<-` (projection)
-        
-        # output result
-        Tag
-      }
-      else{
-        # read data file and extract data
-        Tag <- 
-          read.table(sep = "", na.strings = "", file = data_loc, fill = TRUE,
-                     stringsAsFactors = FALSE, header = TRUE) %>% 
-          
-          # remove first observation (calibration fix)
-          slice(-(n_slice/n_slice):(n_slice * -1)) %>%
-          
-          mutate(
-            # extract the temporal information from the string
-            year = paste0("20", str_sub(string = RTC.date, start = 1, end = 2)),
-            month = paste0(str_sub(string = RTC.date, start = 4, end = 5)),
-            day = paste0(str_sub(string = RTC.date, start = 7, end = 8)),
-            hour = paste0(str_sub(string = RTC.time, start = 1, end = 2)),
-            minute = paste0(str_sub(string = RTC.time, start = 4, end = 5)),
-            second = paste0(str_sub(string = RTC.time, start = 7, end = 8))
-          ) %>% 
-          
-          mutate(
-            # Merge the time and date columns together to formulate the time stamp for a given row
-            timestamp = ISOdate(year = year, month = month, day = day, 
-                                hour = hour, min = minute, sec = second, 
-                                tz = time_zone),
-            
-            # Tag$datetime[nrow(Tag)] = Tag$datetime[nrow(Tag)] + 8 * 60 * 60,
-            # 
-            # Tag$hour[nrow(Tag)] = as.character(as.numeric(Tag$hour[nrow(Tag)]) + 8),
-            # 
-            # timestamp = paste0(year, "-", month, "-", day, " ", hour, ":", minute, ":", second)
-            
-            timestamp_simple = as.Date(str_sub(as.character(timestamp), 
-                                               start = 1, end = 10), 
-                                       format = "%Y-%m-%d"),          
-            # make a fix number column
-            fix_number = str_pad(row.names(.), 2, pad = "0"),
-            
-            # assign name of tag
-            tag_ID = tag_ID
-          ) %>% 
-          
-          # remove observations without a reliable location
-          dplyr::select(tag_ID, timestamp_simple, fix_number, timestamp, 
-                        Sats, Latitude, Longitude, Altitude.m.) %>% 
-          
-          `colnames<-` (tolower(names(.))) %>% 
-          
-          rename(satellites = sats,
-                 tag_ID = tag_id,
-                 elevation = altitude.m.) %>% 
-          
-          mutate(battery = NA,
-            # assign bird ring
-            ring = bird_ID,
-            
-            # assign sex of bird
-            sex = bird_sex, 
-            
-            # assign bird color combo
-            code = bird_code,
-            
-            # assign bird species
-            species = species,
-            
-            # assign bird population
-            population = population,
-            
-            satellites = as.character(satellites)) %>% 
-          
-          # remove observations without a reliable location
-          filter(latitude != 0 | !is.na(latitude)) %>% 
-          
-          # make the dataframe a SpatialPointsDataFrame and define coordinates
-          `coordinates<-` (c("longitude", "latitude")) %>% 
-          
-          # define projection
-          `proj4string<-` (projection)
-        
-        # output result
-        Tag
-      }
-    }
-    
-    else{
-      print("Unknown tag_model. Options are 'PinPoint-10' or 'nanoFix-mini'.")
-    }
-  }
-```
-
-### wrangle GPS data
-```{r}
-library(sp)
-NFTag55843_nz <- 
-  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55843/Obs161122_192740_Tag55843.pos",
-                                tag_ID = "NF55843", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
-                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
-                                bird_ID = "CP9042", bird_code = "FWX.RR|MX.YY", bird_sex = "F", species = "BADO", population = "kaikoura")
-
-NFTag20865_nz <- 
-  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag20865/Obs261022_231825_Tag20865.pos",
-                                tag_ID = "NF20865", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
-                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
-                                bird_ID = "CP9055", bird_code = "FWX.RR|MX.LR", bird_sex = "M", species = "BADO", population = "kaikoura")
-
-NFTag21146_nz <- 
-  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag21146/Obs261022_234604_Tag21146.pos",
-                                tag_ID = "NF21146", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
-                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
-                                bird_ID = "CP9098", bird_code = "XX.RW|MX.LB", bird_sex = "F", species = "BADO", population = "kaikoura")
-
-NFTag55687_nz <- 
-  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55687/Obs261022_232953_Tag55687.pos",
-                                tag_ID = "NF55687", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
-                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
-                                bird_ID = "CP9032", bird_code = "XX.RB|MX.BR", bird_sex = "M", species = "BADO", population = "kaikoura")
-
-NFTag55660_nz <- 
-  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55660/Obs031222_180904_Tag55660.pos",
-                                tag_ID = "NF55660", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
-                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
-                                bird_ID = "CP9066", bird_code = "XX.RB|MX.BY", bird_sex = "F", species = "BADO", population = "kaikoura")
-
-NFTag55795_nz <- 
-  import_plover_tag_spatial_fun(data_loc = "data/GPS/Tag55795/Obs261022_233831_Tag55795.pos",
-                                tag_ID = "NF55795", projection = CRS("+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"),
-                                time_zone = "Europe/London", tag_model = "nanoFix-mini", n_slice = 0,
-                                bird_ID = "CP9096", bird_code = "XX.RW|MX.BY", bird_sex = "F", species = "BADO", population = "kaikoura")
-
-pre_2024_gps_data <- 
-  bind_rows(as.data.frame(NFTag55843_nz),
-            as.data.frame(NFTag20865_nz), as.data.frame(NFTag21146_nz),
-            as.data.frame(NFTag55687_nz), as.data.frame(NFTag55660_nz),
-            as.data.frame(NFTag55795_nz))  %>% 
-  mutate(date_local = as.POSIXct(with_tz(ymd_hms(timestamp, tz = 'UTC'), 'Pacific/Auckland')),
-         site = "KK") %>% 
-  mutate(parent = sapply(.$code, extract_and_merge)) %>% 
-  dplyr::select(-c(timestamp, timestamp_simple, fix_number, satellites, elevation, species, population, code)) %>% 
-  rename(volt = battery,
-         tagID = tag_ID,
-         field_sex = sex) 
-
-pre_2024_gps_data_ <- 
-  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
-             sheet = "Captures", col_types = "c") %>% 
-  dplyr::filter(age == "A" & site == "KK") %>% 
-  filter(species == "BADO") %>% 
-  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
-                      ifelse(tag == "66891" & year == "2022", "66891_2", 
-                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
-         date = ifelse(code == "XX.RW|MX.LG", "2610",
-                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
-         year = ifelse(code == "XX.RW|MX.LG", "2022",
-                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
-  filter(!is.na(date)) %>% 
-  mutate(date = paste(year, ifelse(nchar(date) == 3,
-                                   substring(date, first = 2, last = 3),
-                                   substring(date, first = 3, last = 4)),
-                      ifelse(nchar(date) == 3,
-                             substring(date, first = 1, last = 1),
-                             substring(date, first = 1, last = 2)),
-                      sep = "-") %>% ymd()) %>% 
-  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
-  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>% 
-  # mutate(date_dep = ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland')) %>% 
-  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>%
-  dplyr::select(ring, site, code, tag, field_sex, date_dep) %>% 
-  filter(!is.na(tag) & nchar(tag) > 1) %>% 
-  group_by(ring) %>% 
-  arrange(date_dep) %>% 
-  slice(1) %>% 
-  left_join(pre_2024_gps_data %>% dplyr::select(-c(site, field_sex)), ., by = "ring") %>% 
-  mutate(time_since_deployment = date_local - date_dep) %>% 
-  dplyr::select(-c(code, tag))
-
-```
-
-### wrangle 2024 PTT data
-```{r}
-# establish a connection to the entire database (i.e., that I have access to)
-con = dbcon()
-# connect to the FIELD_2024_BADOatNZ local database
-dbExecute(con, "USE FIELD_2024_BADOatNZ")
-caps_2024 <-
-  dbq(con, "SELECT * FROM CAPTURES") %>% 
-  rowwise() %>% 
-  mutate(time_cap = as.hms(max(cap_start, caught, released, na.rm = TRUE))) %>% 
-  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time_cap, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>% 
-  dplyr::select(ring, field_sex, site, date_dep, tag_id) %>% 
-  rename(tagID = tag_id)
-
-tag_data_2024 <-
-  bind_rows(read.csv("data/PTT/ArgosData_2024_12_19_19_41_20.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_40_37.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_39_43.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_38_57.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_38_33.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_37_26.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_36_30.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_35_42.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_34_57.csv", stringsAsFactors = FALSE),
-            read.csv("data/PTT/ArgosData_2024_12_19_19_33_16.csv", stringsAsFactors = FALSE)) %>% 
-  mutate(temp = (0.474 * SENSOR.01) - 35.662,
-         volt = (0.0079 * SENSOR.02) + 2.4129,
-         acc = SENSOR.04) %>% 
-  dplyr::select(Platform.ID.No., 
-                Loc..date, 
-                Loc..quality, 
-                Longitude, 
-                Latitude, 
-                # Semi.major.axis, 
-                # Semi.minor.axis, 
-                # Ellipse.orientation, 
-                temp, volt, acc) %>% 
-  rename(tagID = Platform.ID.No.,
-         date = Loc..date,
-         locationClass = Loc..quality,
-         longitude = Longitude,
-         latitude = Latitude#,
-         # smaj = Semi.major.axis,
-         # smin = Semi.minor.axis,
-         # eor = Ellipse.orientation
-         ) %>% 
-  mutate(date_ = as_datetime(date),
-         tagID = as.character(tagID)) %>% 
-  mutate(date_local = as.POSIXct(with_tz(ymd_hms(date, tz = 'UTC'), 'Pacific/Auckland'))) %>% 
-  left_join(., caps_2024, by = "tagID") %>% 
-         filter(date_local >= date_dep) %>% 
-         filter(!is.na(volt)) %>% 
-         # dplyr::select(-temp) %>% 
-         distinct() %>% 
-  mutate(time_since_deployment = date_local - date_dep) %>% 
-  filter(tagID != "266470") %>% 
-  dplyr::select(tagID, ring, field_sex, site, date_local, locationClass, longitude, latitude, volt, temp, time_since_deployment, date_dep) %>% 
-  dplyr::select(-c(locationClass))
-```
-
-### wrangle pre-2024 PTT data
-```{r}
-# wrangle KK PTT data
-tag_date_info <-
-  read_excel(here("data/tag_deploy_retrieve_dates.xlsx"), 
-                     col_types = "text") %>%
-  mutate(recapture_date = as.Date(as.POSIXct(as.numeric(recapture_date) * 86400, origin = "1899-12-30", tz = "UTC")),
-         last_argos_data = as.Date(as.POSIXct(as.numeric(last_argos_data) * 86400, origin = "1899-12-30", tz = "UTC")),
-         deployment_date = as.Date(as.POSIXct(as.numeric(deployment_date) * 86400, origin = "1899-12-30", tz = "UTC")))
-
-pre_2024_argos_data <-
-  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
-  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
-  mutate(temp = (0.474 * S1) - 35.662,
-         volt = (0.0079 * S2) + 2.4129) %>% 
-  mutate(date_local = with_tz(locationDate, 'Pacific/Auckland')) %>% 
-  distinct() %>% 
-  mutate(tagID = ifelse(tagID == "66891" & date_local <= as.POSIXct("2022-10-13 12:00:00", tz = 'Pacific/Auckland'), "66891_1",
-                        ifelse(tagID == "66891" & date_local > as.POSIXct("2022-10-13 12:00:00", tz = 'Pacific/Auckland'), "66891_2", tagID))) %>% 
-  dplyr::select(tagID, date_local, locationClass, latitude, longitude, temp, volt) %>% 
-  mutate(tagID = as.character(tagID))
-
-# BADO google sheets
-pre_2024_tag_data <-
-  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit?usp=sharing", 
-             sheet = "Captures", col_types = "c") %>% 
-  dplyr::filter(age == "A" & site == "KK") %>% 
-  filter(species == "BADO") %>% 
-  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
-                      ifelse(tag == "66891" & year == "2022", "66891_2", 
-                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
-         date = ifelse(code == "XX.RW|MX.LG", "2610",
-                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
-         year = ifelse(code == "XX.RW|MX.LG", "2022",
-                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
-  filter(!is.na(date)) %>% 
-  mutate(date = paste(year, ifelse(nchar(date) == 3,
-                                   substring(date, first = 2, last = 3),
-                                   substring(date, first = 3, last = 4)),
-                      ifelse(nchar(date) == 3,
-                             substring(date, first = 1, last = 1),
-                             substring(date, first = 1, last = 2)),
-                      sep = "-") %>% ymd()) %>% 
-  mutate(time = str_pad(time, width = 4, side = "left", pad = "0")) %>% 
-  mutate(time = paste0(substr(time, 1, 2), ":", substr(time, 3, 4), ":00") %>% as_hms) %>% 
-  # mutate(date_dep = ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland')) %>% 
-  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, time, sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>%
-  dplyr::select(ring, site, code, tag, field_sex, date_dep) %>% 
-  filter(!is.na(tag) & nchar(tag) > 1) %>% 
-  mutate(parent = sapply(.$code, extract_and_merge)) %>% 
-  left_join(., tag_date_info, by = "parent") %>% 
-  filter(tag_type == "PTT") %>% 
-  rename(tagID = tag) %>% 
-  dplyr::select(ring, site, tagID, field_sex, date_dep, parent) %>% 
-  left_join(pre_2024_argos_data, ., by = "tagID") %>% 
-  filter(date_local >= date_dep) %>% 
-  mutate(time_since_deployment = date_local - date_dep) %>% 
-  dplyr::select(-c(locationClass))
-
-# bind_rows(pre_2024_gps_data, pre_2024_tag_data)
-
-
-# Need to check the following photos to see if RBWR has tag still ("tag seen missing in 30.08.23, assumed to have fallen off during winter (last seen with tag 26.07.2023)":
-# E:/Dotterel Observations/2023/October/2023_10_11 Dot ob CG WT/IMG_7311.JPG
-# E:/Dotterel Observations/2023/November/2023_11_01 Dot ob Sb ro Ph/IMG_9427.JPG
-# E:/Dotterel Observations/2023/November/2023_11_06 Afternoon dot ob CG to SBC/IMG_0174.JPG
-# E:/Dotterel Observations/2023/November/2023_11_06 Afternoon dot ob CG to SBC/IMG_0186.JPG
-# E:/Dotterel Observations/2023/November/2023_11_13 Dot ob CG to Ph/IMG_1111.JPG
-# E:/Dotterel Observations/2023/December/2023_12_23 Dot ob/IMG_7447.JPG
-# E:/Dotterel Observations/2023/December/2023_12_28 Dob ob/IMG_7770.JPG
-# E:/Dotterel Observations/2024/January/2024_01_05 Dot Check SSB to Clealls/IMG_9780.JPG
-# E:/Dotterel Observations/2024/January/2024_01_06 Dot check Clealls to SSB/IMG_9794.JPG
-# E:/Dotterel Observations/2024/January/2024_01_21 Dot ob with Ben/IMG_4124.JPG
-# E:/Dotterel Observations/2024/January/2024_01_21 Dot ob with Ben/IMG_4212.JPG
-# E:/Dotterel Observations/2024/February/2024_02_12 Dot ob SB/IMG_6589.JPG
-# E:/Dotterel Observations/2024/February/2024_02_12 Dot ob SB/IMG_6619.JPG
-
-# Need to check the following photos to see if RBOG has tag still ("tag likely fell off on 23.11.22 - a day after release"):
-# E:/Dotterel Observations/2022/November/2022_11_15 Dot nest NPG/IMG_0011.JPG
-# E:/Dotterel Observations/2023/January/2023_01_17 Dot ob/IMG_6505.JPG
-# E:/Dotterel Observations/2023/January/2023_01_17 Dot ob/IMG_7118.JPG
-# E:/Dotterel Observations/2023/March/2023_03_17 Dot JA arrival back of RRGO/IMG_0007.JPG
-# E:/Dotterel Observations/2023/March/2023_03_17 Dot JA arrival back of RRGO/IMG_0198.JPG
-# E:/Dotterel Observations/2023/March/2023_03_31 Dot ob Point to JA/IMG_0192.JPG
-```
-
-### bind all tag data together
-```{r}
-str(tag_data_2024)
-str(pre_2024_gps_data_)
-str(pre_2024_tag_data)
-
-names(tag_data_2024) %>% sort()
-names(pre_2024_gps_data_) %>% sort()
-names(pre_2024_tag_data) %>% sort()
-
-all_BADO_tagging_data <- 
-  bind_rows(pre_2024_gps_data_ %>% mutate(tag_type = "GPS"), 
-            tag_data_2024 %>% mutate(tag_type = "PTT"), 
-            pre_2024_tag_data %>% mutate(tag_type = "PTT")) %>% 
-  dplyr::select(ring, parent, site, field_sex, tagID, tag_type, date_dep, 
-                date_local, temp, volt, latitude, longitude, 
-                time_since_deployment)
-```
-
-### plot of tag data collected over time
-```{r}
-all_BADO_tagging_data %>% 
-  filter(site == "KK") %>% 
-  group_by(parent, tag_type) %>% 
-  summarise(min_time = duration(0),
-            max_time = max(time_since_deployment, na.rm = TRUE)) %>%
-  # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>% 
-  mutate(parent = factor(parent, levels = c("RWLB", "RRYY", "RRLR", "RBBR", "RWBY", "RBBY", "RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))) %>% 
-  pivot_longer(
-    cols = c(min_time, max_time),
-    names_to = "time_type",
-    values_to = "time") %>% 
-  mutate(time_days = time/86400) %>% 
-  ggplot() +
-  geom_line(aes(y = parent, x = time_days, color = tag_type))
-
-custom_fill_ <- brewer.pal(9, "Pastel1")[c(2, 3)]
-
-tag_type_facets <- c('GPS' = "1.3g archival GPS tag", 
-                     'PTT' = "1.8g Argos PTT tag")
-
-facets <- 
-  data.frame(parent = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))),
-             label = c("tag retrieved but no data onboard", "tag retrieved but no data onboard", "bird did not return", "bird did not return", rep(NA, 16)),
-             tag_type = c(rep("GPS", 10), rep("PTT", 10))) %>% 
-  mutate(parent = factor(parent,
-                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG")))))
-
-# Define the bin size
-bin_width <- 28
-
-# Bin the data
-binned_data <- 
-  all_BADO_tagging_data %>% 
-  filter(site == "KK") %>% 
-  mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
-  mutate(parent = factor(parent,
-                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))) %>%
-  mutate(time_days = as.numeric(time_since_deployment/86400)) %>%
-  mutate(
-    x_bin = cut(time_days, breaks = seq(floor(min(time_days)), ceiling(max(time_days)), by = bin_width))) %>%
-  group_by(parent, x_bin) %>%
-  summarise(count = n(), .groups = 'drop') %>%
-  mutate(
-    x_bin_center = as.numeric(sub("\\((.+),.*", "\\1", x_bin)) + bin_width / 2
-  ) %>% 
-  left_join(., tag_date_info %>% dplyr::select(parent, tag_type), by = "parent") %>% 
-  distinct()
-
-# tag_data_plot <- 
-  # all_BADO_tagging_data %>% 
-  # filter(site == "KK") %>% 
-    binned_data %>% 
-  # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
-  mutate(parent = factor(parent,
-                         levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))) %>%
-  # mutate(time_days = time_since_deployment/86400) %>% 
-  ggplot(aes(x = x_bin_center, y = parent)) +
-  geom_point(aes(size = count, fill = tag_type), shape = 21, alpha = 1) +
-  scale_size_continuous(range = c(1, 10), 
-                        breaks = c(1, 10, 100, 500), 
-                        labels = c("1", "10", "100", "500")) +
-  # geom_jitter(aes(y = parent, x = time_days, fill = tag_type), shape = 21, alpha = 0.5, height = 0.1, size = 3, color = "grey30") +
-  theme_minimal() +
-  # geom_point(data = tag_date_info %>% 
-  #              mutate(diff = recapture_date - deployment_date,
-  #                     parent = factor(parent,
-  #                        levels = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))
-  #                     ),
-  #            aes(x = diff, y = parent)) +
-  geom_text(data = facets, aes(x = 0, y = parent, label = label), hjust = 0, size = 3, fontface = "italic") +
-  facet_wrap(ncol = 1, "tag_type", scales = "free_y", labeller = as_labeller(tag_type_facets)) +
-  scale_fill_manual(values = custom_fill_) +
-  theme(legend.position = c(0.9, 0.8),
-        strip.text = element_text(size = 12)) +
-  ylab("bird identity") +
-  xlab("days since tag deployment") +
-  guides(fill = "none", size = guide_legend(override.aes = list(color = "black", fill = "grey90")))
-  # scale_color_manual(values = custom_fill_)
-
-
-  
-```
-
-```{r}
-all_BADO_tagging_data_sf <- 
-  all_BADO_tagging_data %>% 
-  filter(site == "KK") %>% 
-  st_as_sf(., 
-           coords = c("longitude", "latitude"),
-           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
-
-all_BADO_tagging_data_sf %>% 
-          filter(parent == "RBWR") %>% 
-          mutate(time_days = time_since_deployment/86400) %>% 
-          filter(time_days > 200) %>% 
-mapview(., zcol = "tagID")
-```
-
-
-
-```{r}
-KK_caps %>% 
-  filter(date_local > recapture_date)
-
-
-
-
-BADO_PTTs_all <-
-  BADO_PTTs %>% 
-  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
-  st_drop_geometry() %>% 
-  mutate(date_dep = as.POSIXct(with_tz(ymd_hms(paste(date, "00:00:00", sep = " "), tz = 'Pacific/Auckland'), 'Pacific/Auckland'))) %>% 
-  mutate(date_local = as.POSIXct(with_tz(ymd_hms(locationDate, tz = 'UTC'), 'Pacific/Auckland')),
-         site = "KK") %>%
-  rename(id = tagID,
-         lc = locationClass,
-         field_sex = sex) %>% 
-  mutate(time_since_deployment = date_local - date_dep) %>% 
-  dplyr::select(id, ring, field_sex, site, date_local, lc, lon, lat, volt, temp, time_since_deployment) %>% arrange(desc(date_local))
-  bind_rows(., argos_data)
-
-ggplot(data = BADO_PTTs_all) +
-  geom_line(aes(x = time_since_deployment, y = volt, group = id), alpha = 0.5) +
-  facet_wrap("site", nrow = 2)
-
-voltage_lmer <- 
-  lmer(scale(volt) ~ scale(time_since_deployment) + (1|id) + (1|site), data = argos_data)
-
-tidy_voltage_lmer <-
-  tidy(voltage_lmer, conf.int = TRUE, conf.method = "boot", nsim = 1000)
-
-summary(voltage_lm)
-tidy
-plot(allEffects(voltage_lm))
-```
-
-
-
 ```{r}
 
-### import and wrangle ----
-# 2024 data 
-# establish a connection to the entire database (i.e., that I have access to)
-con = dbcon()
-
-# connect to the FIELD_2024_BADOatNZ local database
-dbExecute(con, "USE FIELD_2024_BADOatNZ")
-
-# query to select everything from the "incoming" table
-# caps_2024 <-
-  dbq(con, "SELECT * FROM CAPTURES") %>% 
-    filter(nchar(tag_id) == 6) %>% arrange(tag_id) %>% pull(tag_id) %>% unique() %>% .[1:10] %>% paste(., collapse = ", ")
-  filter(age != "J") %>% 
-  rowwise() %>%
-  mutate(time = as_hms(min(cap_start, caught, released, na.rm = TRUE))) %>% 
-    mutate(UL = ifelse(is.na(UL) | UL == "" | UL == "X", "XX", UL),
-           LL = ifelse(is.na(LL) | LL == "" | LL == "X", "XX", LL),
-           UR = ifelse(is.na(UR) | UR == "" | UR == "X", "XX", UR),
-           LR = ifelse(is.na(LR) | LR == "" | LR == "X", "XX", LR)) %>% 
-    mutate(UL = ifelse(UL == "M", "MX", UL),
-           UR = ifelse(UR == "M", "MX", UR)) %>% 
-  mutate(code = paste0(UL,".", LL, "|", UR,".", LR)) %>% 
-  mutate(code = str_remove_all(code, ",")) %>% 
-  dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, total_head, wing, wt_w_tag, tag_action, tag_id) %>%
-  # remove pre-nesting females (weights are confounded by oogenisis)
-  filter(ring != "CP19336" & weight != 66.6) %>% 
-  filter(ring != "CP9088" & weight != 75.2) %>% 
-  filter(ring != "CP16483" & weight != 63.8)# %>% 
-  # filter(ring == "CP16134")
-
-# scidb
-con <- dbo::dbcon(server = "scidb_replica")
-
-KK_PTT_data <- 
-  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
-  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
-  filter(longitude > 100 & latitude < 0) %>% 
-  mutate(temp = (0.474 * S1) - 35.662,
-         volt = (0.0079 * S2) + 2.4129) %>% 
-  dplyr::select(tagID, locationDate, locationClass, latitude, longitude, temp, volt) %>% 
-  distinct() %>% 
-  mutate(source = "tag")
-
-# BADO google sheets
-BADO_caps_raw <- 
-  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit#gid=1382609695", 
-            sheet = "Captures", col_types = "c") 
-
-BADO_resights_raw <- 
-  read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit#gid=1382609695", 
-             sheet = "Resights", col_types = "c")
-
-#### custom functions ----
-sfc_as_cols <- function(x, geometry, names = c("x","y")) {
-  if (missing(geometry)) {
-    geometry <- sf::st_geometry(x)
-  } else {
-    geometry <- rlang::eval_tidy(enquo(geometry), x)
-  }
-  stopifnot(inherits(x,"sf") && inherits(geometry,"sfc_POINT"))
-  ret <- sf::st_coordinates(geometry)
-  ret <- tibble::as_tibble(ret)
-  stopifnot(length(names) == ncol(ret))
-  x <- x[ , !names(x) %in% names]
-  ret <- setNames(ret,names)
-  dplyr::bind_cols(x,ret)
-}
-
-# function that does the opposite of "%in%"
-`%!in%` = Negate(`%in%`)
-
-#### wrangle Argos and banding data
-
-# classify PTT color combos
-PTTs <- 
-  c("XX.RB|MX.RL", "XX.RR|MX.RG", "XX.RR|MX.GO", "XX.RR|MX.OW", "XX.RB|MX.WO",
-    "XX.RB|MX.WR", "XX.RB|MX.OG", "XX.RB|MX.GB", "XX.RW|MX.LG", "XX.RB|MX.OY")#,
-    # "MX.YY|XX.BO", "MX.YY|XX.BY", "MX.YY|XX.BW", "MX.YY|XX.BR", "MX.YW|XX.GW", 
-    # "MX.YW|XX.BY", "MX.YW|XX.RG")
-
-# wrangle coordinate system of cap and resight data
-BADO_resights <-
-  BADO_resights_raw %>% 
-  filter(utm != "WGS87") %>% 
-  filter(!is.na(easting)) %>% 
-  st_as_sf(., coords = c("easting", "northing"), crs = 2193) %>% 
-  st_transform(., crs = 4326) %>% 
-  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
-  st_drop_geometry() %>%
-  bind_rows(BADO_resights_raw %>% filter(utm == "WGS87") %>% 
-              rename(latitude = northing, longitude = easting) %>% 
-              mutate(longitude = as.numeric(longitude),
-                     latitude = as.numeric(latitude))) %>% 
-  filter(sex != "J") %>% 
-  filter(site %!in% c("KT", "KK")) %>%
-  mutate(date = paste(year, 
-                       ifelse(nchar(date) == 3, 
-                              str_sub(date, start = 2, end = 3), 
-                              str_sub(date, start = 3, end = 4)), 
-                       ifelse(nchar(date) == 3, 
-                              str_sub(date, start = 1, end = 1), 
-                              str_sub(date, start = 1, end = 2)), 
-                       sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
-  left_join(., BADO_caps_raw %>% filter(sex != "J") %>% filter(!is.na(easting)) %>% dplyr::select(ring, code, tag),
-            by = "code") %>%
-  mutate(source = "resight") %>% 
-  st_as_sf(., 
-           coords = c("longitude", "latitude"),
-           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
-  mutate(status = ifelse(code %in% PTTs, "tag", "no-tag")) %>%
-  mutate(tag = ifelse(tag == "66891" & year == "2021", "66891_1",
-                      ifelse(tag == "66891" & year == "2022", "66891_2", tag))) %>% 
-  rename(tagID = tag) %>% 
-  dplyr::select(source, ring, code, sex, date, tagID, status)
-
-BADO_caps <-
-  BADO_caps_raw %>% 
-  filter(utm != "WGS87") %>% 
-  mutate(easting = as.numeric(easting),
-         northing = as.numeric(northing)) %>% 
-  filter(!is.na(easting)) %>% 
-  st_as_sf(., coords = c("easting", "northing"), crs = 2193) %>% 
-  st_transform(., crs = 4326) %>% 
-  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
-  st_drop_geometry() %>% 
-  bind_rows(., BADO_caps_raw %>% filter(utm == "WGS87") %>% 
-              rename(longitude = easting, latitude = northing) %>% 
-              mutate(longitude = as.numeric(longitude), latitude = as.numeric(latitude))) %>% 
-  group_by(ring) %>% 
-  slice(1) %>% 
-  ungroup() %>% 
-  mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
-                      ifelse(tag == "66891" & year == "2022", "66891_2", 
-                             ifelse(code == "XX.RW|MX.LG", "234673", tag))),
-         date = ifelse(code == "XX.RW|MX.LG", "2610",
-                       ifelse(code == "XX.RR|MX.RG", "1410", date)),
-         year = ifelse(code == "XX.RW|MX.LG", "2022",
-                       ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
-  mutate(date = paste(year, 
-                      ifelse(nchar(date) == 3, 
-                             str_sub(date, start = 2, end = 3), 
-                             str_sub(date, start = 3, end = 4)), 
-                      ifelse(nchar(date) == 3, 
-                             str_sub(date, start = 1, end = 1), 
-                             str_sub(date, start = 1, end = 2)), 
-                      sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
-  rename(tagID = tag) %>% 
-  mutate(source = "capture") %>% 
-  dplyr::select(source, ring, code, tagID, sex, date, longitude, latitude) %>% 
-  st_as_sf(., 
-           coords = c("longitude", "latitude"),
-           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
-  mutate(status = ifelse(code %in% PTTs, "tag", "no-tag")) %>% 
-  filter(code %in% BADO_resights$code | code %in% PTTs)
-
-#### wrangle BADO Argos data ----
-BADO_PTTs <- 
-  dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
-  bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
-  filter(longitude > 100 & latitude < 0) %>% 
-  mutate(temp = (0.474 * S1) - 35.662,
-         volt = (0.0079 * S2) + 2.4129) %>% 
-  dplyr::select(tagID, locationDate, locationClass, latitude, longitude, temp, volt) %>% 
-  distinct() %>% 
-  mutate(source = "tag") %>% 
-  st_as_sf(., 
-           coords = c("longitude", "latitude"),
-           crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>%
-  sfc_as_cols(., names = c("lon", "lat")) %>%
-  # filter(locationClass %in% c(1, 2, 3)) %>% 
-  filter(year(locationDate) > 2020) %>%
-  mutate(tagID = ifelse(tagID == "66891" & locationDate < as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_1",
-                      ifelse(tagID == "66891" & locationDate >= as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_2", tagID))) %>%  
-  left_join(., BADO_caps %>% st_drop_geometry() %>% dplyr::select(ring, code, tagID, date, sex), by = "tagID") %>% #filter(tagID == "234673")
-  rename(cap_date = date,) %>% 
-  filter(locationDate >= cap_date) %>% 
-  mutate(date = as.Date(locationDate),
-         status = "tag") #%>% 
-  # dplyr::select(-cap_date, -locationClass, -locationDate, -temp, -volt)
-
-BADO_PTTs %>% 
-  pull(tagID) %>% 
-  unique() %>% 
-  sort() %>% 
-  paste(., collapse = ", ")
-
-sf_points = BADO_PTTs %>% filter(tagID == "234658")
-
-# Function to create lines connecting points
-create_lines <- function(sf_points) {
-  line_list <- list()
-  
-  for (i in 1:(nrow(sf_points) - 1)) {
-    line <- st_sfc(st_linestring(rbind(st_coordinates(sf_points[i, ]), st_coordinates(sf_points[i + 1, ]))))
-    line_list[[i]] <- st_sf(geometry = line, time = sf_points$locationDate[i + 1])
-  }
-  
-  do.call(rbind, line_list)
-}
-
-sf_lines <- create_lines(BADO_PTTs)
-
-# Extract coordinates for leaflet.minicharts
-coords <- sf_points %>% st_coordinates()
-
-# Create leaflet map
-leaflet() %>%
-  addProviderTiles(providers$CartoDB.Positron) %>%
-  addFlows(
-    lng0 = coords[1:(nrow(coords)-1), "X"], lat0 = coords[1:(nrow(coords)-1), "Y"],
-    lng1 = coords[2:nrow(coords), "X"], lat1 = coords[2:nrow(coords), "Y"],
-    color = "blue",
-    opacity = 0.5,  # Set transparency
-    flow = TRUE,
-    maxThickness = 5  # Set size (thickness) of the flow lines
-  ) %>%
-  addCircleMarkers(data = sf_points, color = "red", radius = 5, popup = ~as.character(locationDate))
-
-# Ensure that the coordinate vectors are correctly handled
-lng0 <- coords[1:(nrow(coords)-1), "X"]
-lat0 <- coords[1:(nrow(coords)-1), "Y"]
-lng1 <- coords[2:nrow(coords), "X"]
-lat1 <- coords[2:nrow(coords), "Y"]
-
-# Confirming the lengths match
-length(lng0) == length(lat0) && length(lng1) == length(lat1) && length(lng0) == length(lng1)
-
-
-# Create a leaflet map
-map <- leaflet() %>%
-  addProviderTiles(providers$CartoDB.Positron) %>%
-  addCircleMarkers(data = sf_points, color = "red", radius = 5, popup = ~as.character(locationDate)) %>%
-  addPolylines(data = sf_lines, color = "blue", weight = 2)
-
-# Animate the lines
-# Note: leaflet.extras doesn't directly support animation, 
-# but you can use the `addTimeline` function for a simple temporal visualization.
-map %>% addTimeline(data = sf_lines, timelineOptions = timelineOptions(
-  styleOptions = list(
-    color = "blue",
-    weight = 2
-  ),
-  steps = 500,
-  duration = 10000,
-  easing = "linear"
-))
-
-mapview(BADO_PTTs%>% filter(tagID == "66891_1"), zcol = "tagID")
-
-KK_PTT_last_dates <- 
-  BADO_PTTs %>% 
-  sfc_as_cols(., names = c("longitude", "latitude")) %>% 
-  st_drop_geometry() %>% 
-  group_by(tagID, code) %>%
-  summarise(last_Argos_data = max(date))
-
-KK_PTT_last_dates$parent <- 
-  sapply(KK_PTT_last_dates$code, extract_and_merge)
-
-KK_PTT_last_dates %>% 
-  filter(str_sub(parent, 1, 1) == "R")
+# ### import and wrangle ----
+# # 2024 data 
+# # establish a connection to the entire database (i.e., that I have access to)
+# con = dbcon()
+# 
+# # connect to the FIELD_2024_BADOatNZ local database
+# dbExecute(con, "USE FIELD_2024_BADOatNZ")
+# 
+# # query to select everything from the "incoming" table
+# # caps_2024 <-
+#   dbq(con, "SELECT * FROM CAPTURES") %>% 
+#     filter(nchar(tag_id) == 6) %>% arrange(tag_id) %>% pull(tag_id) %>% unique() %>% .[1:10] %>% paste(., collapse = ", ")
+#   filter(age != "J") %>% 
+#   rowwise() %>%
+#   mutate(time = as_hms(min(cap_start, caught, released, na.rm = TRUE))) %>% 
+#     mutate(UL = ifelse(is.na(UL) | UL == "" | UL == "X", "XX", UL),
+#            LL = ifelse(is.na(LL) | LL == "" | LL == "X", "XX", LL),
+#            UR = ifelse(is.na(UR) | UR == "" | UR == "X", "XX", UR),
+#            LR = ifelse(is.na(LR) | LR == "" | LR == "X", "XX", LR)) %>% 
+#     mutate(UL = ifelse(UL == "M", "MX", UL),
+#            UR = ifelse(UR == "M", "MX", UR)) %>% 
+#   mutate(code = paste0(UL,".", LL, "|", UR,".", LR)) %>% 
+#   mutate(code = str_remove_all(code, ",")) %>% 
+#   dplyr::select(site, ring, code, field_sex, age, date, time, weight, culmen, tarsus, total_head, wing, wt_w_tag, tag_action, tag_id) %>%
+#   # remove pre-nesting females (weights are confounded by oogenisis)
+#   filter(ring != "CP19336" & weight != 66.6) %>% 
+#   filter(ring != "CP9088" & weight != 75.2) %>% 
+#   filter(ring != "CP16483" & weight != 63.8)# %>% 
+#   # filter(ring == "CP16134")
+# 
+# # scidb
+# con <- dbo::dbcon(server = "scidb_replica")
+# 
+# KK_PTT_data <- 
+#   dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
+#   bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
+#   filter(longitude > 100 & latitude < 0) %>% 
+#   mutate(temp = (0.474 * S1) - 35.662,
+#          volt = (0.0079 * S2) + 2.4129) %>% 
+#   dplyr::select(tagID, locationDate, locationClass, latitude, longitude, temp, volt) %>% 
+#   distinct() %>% 
+#   mutate(source = "tag")
+# 
+# # BADO google sheets
+# BADO_caps_raw <- 
+#   read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit#gid=1382609695", 
+#             sheet = "Captures", col_types = "c") 
+# 
+# BADO_resights_raw <- 
+#   read_sheet("https://docs.google.com/spreadsheets/d/1Tp26Z23HSXXZSoGXD4dbP3xukhrY1kWhzQrbtRHt4EY/edit#gid=1382609695", 
+#              sheet = "Resights", col_types = "c")
+# 
+# #### custom functions ----
+# sfc_as_cols <- function(x, geometry, names = c("x","y")) {
+#   if (missing(geometry)) {
+#     geometry <- sf::st_geometry(x)
+#   } else {
+#     geometry <- rlang::eval_tidy(enquo(geometry), x)
+#   }
+#   stopifnot(inherits(x,"sf") && inherits(geometry,"sfc_POINT"))
+#   ret <- sf::st_coordinates(geometry)
+#   ret <- tibble::as_tibble(ret)
+#   stopifnot(length(names) == ncol(ret))
+#   x <- x[ , !names(x) %in% names]
+#   ret <- setNames(ret,names)
+#   dplyr::bind_cols(x,ret)
+# }
+# 
+# # function that does the opposite of "%in%"
+# `%!in%` = Negate(`%in%`)
+# 
+# #### wrangle Argos and banding data
+# 
+# # classify PTT color combos
+# PTTs <- 
+#   c("XX.RB|MX.RL", "XX.RR|MX.RG", "XX.RR|MX.GO", "XX.RR|MX.OW", "XX.RB|MX.WO",
+#     "XX.RB|MX.WR", "XX.RB|MX.OG", "XX.RB|MX.GB", "XX.RW|MX.LG", "XX.RB|MX.OY")#,
+#     # "MX.YY|XX.BO", "MX.YY|XX.BY", "MX.YY|XX.BW", "MX.YY|XX.BR", "MX.YW|XX.GW", 
+#     # "MX.YW|XX.BY", "MX.YW|XX.RG")
+# 
+# # wrangle coordinate system of cap and resight data
+# BADO_resights <-
+#   BADO_resights_raw %>% 
+#   filter(utm != "WGS87") %>% 
+#   filter(!is.na(easting)) %>% 
+#   st_as_sf(., coords = c("easting", "northing"), crs = 2193) %>% 
+#   st_transform(., crs = 4326) %>% 
+#   sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+#   st_drop_geometry() %>%
+#   bind_rows(BADO_resights_raw %>% filter(utm == "WGS87") %>% 
+#               rename(latitude = northing, longitude = easting) %>% 
+#               mutate(longitude = as.numeric(longitude),
+#                      latitude = as.numeric(latitude))) %>% 
+#   filter(sex != "J") %>% 
+#   filter(site %!in% c("KT", "KK")) %>%
+#   mutate(date = paste(year, 
+#                        ifelse(nchar(date) == 3, 
+#                               str_sub(date, start = 2, end = 3), 
+#                               str_sub(date, start = 3, end = 4)), 
+#                        ifelse(nchar(date) == 3, 
+#                               str_sub(date, start = 1, end = 1), 
+#                               str_sub(date, start = 1, end = 2)), 
+#                        sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
+#   left_join(., BADO_caps_raw %>% filter(sex != "J") %>% filter(!is.na(easting)) %>% dplyr::select(ring, code, tag),
+#             by = "code") %>%
+#   mutate(source = "resight") %>% 
+#   st_as_sf(., 
+#            coords = c("longitude", "latitude"),
+#            crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
+#   mutate(status = ifelse(code %in% PTTs, "tag", "no-tag")) %>%
+#   mutate(tag = ifelse(tag == "66891" & year == "2021", "66891_1",
+#                       ifelse(tag == "66891" & year == "2022", "66891_2", tag))) %>% 
+#   rename(tagID = tag) %>% 
+#   dplyr::select(source, ring, code, sex, date, tagID, status)
+# 
+# BADO_caps <-
+#   BADO_caps_raw %>% 
+#   filter(utm != "WGS87") %>% 
+#   mutate(easting = as.numeric(easting),
+#          northing = as.numeric(northing)) %>% 
+#   filter(!is.na(easting)) %>% 
+#   st_as_sf(., coords = c("easting", "northing"), crs = 2193) %>% 
+#   st_transform(., crs = 4326) %>% 
+#   sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+#   st_drop_geometry() %>% 
+#   bind_rows(., BADO_caps_raw %>% filter(utm == "WGS87") %>% 
+#               rename(longitude = easting, latitude = northing) %>% 
+#               mutate(longitude = as.numeric(longitude), latitude = as.numeric(latitude))) %>% 
+#   group_by(ring) %>% 
+#   slice(1) %>% 
+#   ungroup() %>% 
+#   mutate(tag = ifelse(code == "XX.RR|MX.RG" & year == "2021", "66891_1",
+#                       ifelse(tag == "66891" & year == "2022", "66891_2", 
+#                              ifelse(code == "XX.RW|MX.LG", "234673", tag))),
+#          date = ifelse(code == "XX.RW|MX.LG", "2610",
+#                        ifelse(code == "XX.RR|MX.RG", "1410", date)),
+#          year = ifelse(code == "XX.RW|MX.LG", "2022",
+#                        ifelse(code == "XX.RR|MX.RG", "2021", year))) %>% 
+#   mutate(date = paste(year, 
+#                       ifelse(nchar(date) == 3, 
+#                              str_sub(date, start = 2, end = 3), 
+#                              str_sub(date, start = 3, end = 4)), 
+#                       ifelse(nchar(date) == 3, 
+#                              str_sub(date, start = 1, end = 1), 
+#                              str_sub(date, start = 1, end = 2)), 
+#                       sep = "-") %>% as.Date(., format = "%Y-%m-%d")) %>% 
+#   rename(tagID = tag) %>% 
+#   mutate(source = "capture") %>% 
+#   dplyr::select(source, ring, code, tagID, sex, date, longitude, latitude) %>% 
+#   st_as_sf(., 
+#            coords = c("longitude", "latitude"),
+#            crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>% 
+#   mutate(status = ifelse(code %in% PTTs, "tag", "no-tag")) %>% 
+#   filter(code %in% BADO_resights$code | code %in% PTTs)
+# 
+# #### wrangle BADO Argos data ----
+# BADO_PTTs <- 
+#   dbq(q = "SELECT * FROM ARGOS.2022_BADO") %>% 
+#   bind_rows(dbq(q = "SELECT * FROM ARGOS.2020_BADO")) %>% 
+#   filter(longitude > 100 & latitude < 0) %>% 
+#   mutate(temp = (0.474 * S1) - 35.662,
+#          volt = (0.0079 * S2) + 2.4129) %>% 
+#   dplyr::select(tagID, locationDate, locationClass, latitude, longitude, temp, volt) %>% 
+#   distinct() %>% 
+#   mutate(source = "tag") %>% 
+#   st_as_sf(., 
+#            coords = c("longitude", "latitude"),
+#            crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0") %>%
+#   sfc_as_cols(., names = c("lon", "lat")) %>%
+#   # filter(locationClass %in% c(1, 2, 3)) %>% 
+#   filter(year(locationDate) > 2020) %>%
+#   mutate(tagID = ifelse(tagID == "66891" & locationDate < as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_1",
+#                       ifelse(tagID == "66891" & locationDate >= as.Date("2022-10-28", format = "%Y-%m-%d"), "66891_2", tagID))) %>%  
+#   left_join(., BADO_caps %>% st_drop_geometry() %>% dplyr::select(ring, code, tagID, date, sex), by = "tagID") %>% #filter(tagID == "234673")
+#   rename(cap_date = date,) %>% 
+#   filter(locationDate >= cap_date) %>% 
+#   mutate(date = as.Date(locationDate),
+#          status = "tag") #%>% 
+#   # dplyr::select(-cap_date, -locationClass, -locationDate, -temp, -volt)
+# 
+# BADO_PTTs %>% 
+#   pull(tagID) %>% 
+#   unique() %>% 
+#   sort() %>% 
+#   paste(., collapse = ", ")
+# 
+# sf_points = BADO_PTTs %>% filter(tagID == "234658")
+# 
+# # Function to create lines connecting points
+# create_lines <- function(sf_points) {
+#   line_list <- list()
+#   
+#   for (i in 1:(nrow(sf_points) - 1)) {
+#     line <- st_sfc(st_linestring(rbind(st_coordinates(sf_points[i, ]), st_coordinates(sf_points[i + 1, ]))))
+#     line_list[[i]] <- st_sf(geometry = line, time = sf_points$locationDate[i + 1])
+#   }
+#   
+#   do.call(rbind, line_list)
+# }
+# 
+# sf_lines <- create_lines(BADO_PTTs)
+# 
+# # Extract coordinates for leaflet.minicharts
+# coords <- sf_points %>% st_coordinates()
+# 
+# # Create leaflet map
+# leaflet() %>%
+#   addProviderTiles(providers$CartoDB.Positron) %>%
+#   addFlows(
+#     lng0 = coords[1:(nrow(coords)-1), "X"], lat0 = coords[1:(nrow(coords)-1), "Y"],
+#     lng1 = coords[2:nrow(coords), "X"], lat1 = coords[2:nrow(coords), "Y"],
+#     color = "blue",
+#     opacity = 0.5,  # Set transparency
+#     flow = TRUE,
+#     maxThickness = 5  # Set size (thickness) of the flow lines
+#   ) %>%
+#   addCircleMarkers(data = sf_points, color = "red", radius = 5, popup = ~as.character(locationDate))
+# 
+# # Ensure that the coordinate vectors are correctly handled
+# lng0 <- coords[1:(nrow(coords)-1), "X"]
+# lat0 <- coords[1:(nrow(coords)-1), "Y"]
+# lng1 <- coords[2:nrow(coords), "X"]
+# lat1 <- coords[2:nrow(coords), "Y"]
+# 
+# # Confirming the lengths match
+# length(lng0) == length(lat0) && length(lng1) == length(lat1) && length(lng0) == length(lng1)
+# 
+# 
+# # Create a leaflet map
+# map <- leaflet() %>%
+#   addProviderTiles(providers$CartoDB.Positron) %>%
+#   addCircleMarkers(data = sf_points, color = "red", radius = 5, popup = ~as.character(locationDate)) %>%
+#   addPolylines(data = sf_lines, color = "blue", weight = 2)
+# 
+# # Animate the lines
+# # Note: leaflet.extras doesn't directly support animation, 
+# # but you can use the `addTimeline` function for a simple temporal visualization.
+# map %>% addTimeline(data = sf_lines, timelineOptions = timelineOptions(
+#   styleOptions = list(
+#     color = "blue",
+#     weight = 2
+#   ),
+#   steps = 500,
+#   duration = 10000,
+#   easing = "linear"
+# ))
+# 
+# mapview(BADO_PTTs%>% filter(tagID == "66891_1"), zcol = "tagID")
+# 
+# KK_PTT_last_dates <- 
+#   BADO_PTTs %>% 
+#   sfc_as_cols(., names = c("longitude", "latitude")) %>% 
+#   st_drop_geometry() %>% 
+#   group_by(tagID, code) %>%
+#   summarise(last_Argos_data = max(date))
+# 
+# KK_PTT_last_dates$parent <- 
+#   sapply(KK_PTT_last_dates$code, extract_and_merge)
+# 
+# KK_PTT_last_dates %>% 
+#   filter(str_sub(parent, 1, 1) == "R")
 ```
 
 
@@ -3105,447 +4204,446 @@ KK_PTT_last_dates %>%
 
 
 ```{r}
-# Perform pairwise comparisons for tag_type effects
-hypothesis(model_brm, "tag_typeGPS > control")
-hypothesis(model_brm, "tag_typePTT > control")
-
-# Summarize the coefficients
-tag_type_summary <- posterior_summary(tag_type_coeffs)
-print(tag_type_summary)
-
-# View the structure of the posterior samples
-str(post_samples)
-
-# Extract fixed effects summary
-fixed_effects <- 
-  summary(model_brm)$fixed
-
-# Create a data frame for easier manipulation
-fixed_effects_df <- as.data.frame(fixed_effects)
-fixed_effects_df$Parameter <- rownames(fixed_effects_df)
-
-# Select and rename columns for clarity
-plot_data <-
-  fixed_effects_df %>%
-  dplyr::select(Parameter, Estimate, `l-95% CI`, `u-95% CI`) %>%
-  rename(Estimate = Estimate, 
-         Q2.5 = `l-95% CI`, 
-         Q97.5 = `u-95% CI`) %>%
-  filter(Parameter %!in% c("muunkn_tag_typePTT", "muaband_tag_typeGPS")) %>% 
-  filter(str_detect(Parameter, "unkn", negate = TRUE))
-  # filter(grepl("tag_type", Parameter)) %>% 
-  # filter(str_detect("muunkn", Parameter, negate = TRUE)) # Filter to include only the effects of interest (e.g., tag_type)
-
-# Create the forest plot
-ggplot(plot_data, aes(x = Estimate, y = Parameter)) +
-  geom_point(size = 3) +
-  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
-  theme_minimal() +
-  labs(title = "Effect Sizes of Tag Type on Nest State",
-       x = "Estimate",
-       y = "Tag Type") +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "red")
-
-##
-fixed_effects_df["muaband_tag_typeGPS", "Estimate"] <-
-  fixed_effects_df["muaband_tag_typeGPS", "Estimate"] + fixed_effects_df["muaband_Intercept", "Estimate"]
-
-fixed_effects_df["muaband_tag_typePTT", "Estimate"] <-
-  fixed_effects_df["muaband_tag_typePTT", "Estimate"] + fixed_effects_df["muaband_Intercept", "Estimate"]
-
-fixed_effects_df["mubrood_tag_typeGPS", "Estimate"] <-
-  fixed_effects_df["mubrood_tag_typeGPS", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
-
-fixed_effects_df["mufail_tag_typecontrol", "Estimate"] <-
-  fixed_effects_df["mufail_tag_typecontrol", "Estimate"] + fixed_effects_df["mufail_Intercept", "Estimate"]
-
-fixed_effects_df["mufail_tag_typePTT", "Estimate"] <-
-  fixed_effects_df["mufail_tag_typePTT", "Estimate"] + fixed_effects_df["mufail_Intercept", "Estimate"]
-
-fixed_effects_df["mubrood_tag_typecontrol", "Estimate"] <-
-  fixed_effects_df["mubrood_tag_typecontrol", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
-
-fixed_effects_df["mubrood_tag_typePTT", "Estimate"] <-
-  fixed_effects_df["mubrood_tag_typePTT", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
-##
-fixed_effects_df["muaband_tag_typeGPS", "lci"] <-
-  fixed_effects_df["muaband_tag_typeGPS", "lci"] + fixed_effects_df["muaband_Intercept", "lci"]
-
-fixed_effects_df["muaband_tag_typePTT", "lci"] <-
-  fixed_effects_df["muaband_tag_typePTT", "lci"] + fixed_effects_df["muaband_Intercept", "lci"]
-
-fixed_effects_df["mubrood_tag_typeGPS", "lci"] <-
-  fixed_effects_df["mubrood_tag_typeGPS", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
-
-fixed_effects_df["mufail_tag_typecontrol", "lci"] <-
-  fixed_effects_df["mufail_tag_typecontrol", "lci"] + fixed_effects_df["mufail_Intercept", "lci"]
-
-fixed_effects_df["mufail_tag_typePTT", "lci"] <-
-  fixed_effects_df["mufail_tag_typePTT", "lci"] + fixed_effects_df["mufail_Intercept", "lci"]
-
-fixed_effects_df["mubrood_tag_typecontrol", "lci"] <-
-  fixed_effects_df["mubrood_tag_typecontrol", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
-
-fixed_effects_df["mubrood_tag_typePTT", "lci"] <-
-  fixed_effects_df["mubrood_tag_typePTT", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
-##
-fixed_effects_df["muaband_tag_typeGPS", "uci"] <-
-  fixed_effects_df["muaband_tag_typeGPS", "uci"] + fixed_effects_df["muaband_Intercept", "uci"]
-
-fixed_effects_df["muaband_tag_typePTT", "uci"] <-
-  fixed_effects_df["muaband_tag_typePTT", "uci"] + fixed_effects_df["muaband_Intercept", "uci"]
-
-fixed_effects_df["mubrood_tag_typeGPS", "uci"] <-
-  fixed_effects_df["mubrood_tag_typeGPS", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
-
-fixed_effects_df["mufail_tag_typecontrol", "uci"] <-
-  fixed_effects_df["mufail_tag_typecontrol", "uci"] + fixed_effects_df["mufail_Intercept", "uci"]
-
-fixed_effects_df["mufail_tag_typePTT", "uci"] <-
-  fixed_effects_df["mufail_tag_typePTT", "uci"] + fixed_effects_df["mufail_Intercept", "uci"]
-
-fixed_effects_df["mubrood_tag_typecontrol", "uci"] <-
-  fixed_effects_df["mubrood_tag_typecontrol", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
-
-fixed_effects_df["mubrood_tag_typePTT", "uci"] <-
-  fixed_effects_df["mubrood_tag_typePTT", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
-
-# Function to calculate probabilities from log odds
-log_odds_to_prob <- function(log_odds) {
-  exp(log_odds) / (1 + exp(log_odds))
-}
-
-fixed_effects_df_ <- 
-  fixed_effects_df %>%
-  filter(!is.na(Estimate)) %>% 
-  mutate(across(c(Estimate, lci, uci), log_odds_to_prob)) %>% 
-  as.tibble()
-
-fixed_effects_df_a_b_G_P
-
-fixed_effects_df_f_b_c_P <- 
-  fixed_effects_df_
-
-# Extract fixed effects summary
-fixed_effects <- summary(model_brm)$fixed
-
-# Create a data frame for easier manipulation
-fixed_effects_df <- as.data.frame(fixed_effects)
-fixed_effects_df$Parameter <- rownames(fixed_effects_df)
-
-# Function to calculate probabilities from log odds
-log_odds_to_prob <- function(log_odds) {
-  exp(log_odds) / (1 + exp(log_odds))
-}
-
-# Extract the intercepts
-intercepts <- fixed_effects_df %>%
-  filter(grepl("Intercept", Parameter))
-
-# Extract the tag type effects
-tag_effects <- fixed_effects_df %>%
-  filter(grepl("tag_type", Parameter))
-
-# Calculate the probabilities for each state, including credible intervals
-states <- unique(data$state)
-probabilities <- data.frame(State = character(), 
-                             Tag_Type = character(), 
-                             Probability = numeric(), 
-                             `l-95% CI` = numeric(), 
-                             `u-95% CI` = numeric())
-
-for (state in states) {
-  intercept <- intercepts %>% filter(grepl(state, Parameter)) 
-  intercept_est <- intercept$Estimate
-  intercept_lower <- intercept$`l-95% CI`
-  intercept_upper <- intercept$`u-95% CI`
-  
-  for (tag in levels(data$tag_type)) {
-    tag_effect <- tag_effects %>% 
-      filter(grepl(paste0("tag_type", tag), Parameter) & grepl(state, Parameter))
-    
-    # Ensure we are getting only 1 row for tag effect (should be one for each state)
-    if (nrow(tag_effect) == 1) {
-      tag_est <- tag_effect$Estimate
-      tag_lower <- tag_effect$Q2.5
-      tag_upper <- tag_effect$Q97.5
-      
-      # Calculate the log odds for the intercept and tag type effect
-      log_odds_est <- intercept_est + tag_est
-      log_odds_lower <- intercept_lower + tag_lower
-      log_odds_upper <- intercept_upper + tag_upper
-      
-      # Convert log odds to probabilities
-      prob_est <- log_odds_to_prob(log_odds_est)
-      prob_lower <- log_odds_to_prob(log_odds_lower)
-      prob_upper <- log_odds_to_prob(log_odds_upper)
-      
-      # Store the results
-      probabilities <- rbind(probabilities, data.frame(State = state, 
-                                                       Tag_Type = tag, 
-                                                       Probability = prob_est, 
-                                                       `l-95% CI` = prob_lower, 
-                                                       `u-95% CI` = prob_upper))
-    } else {
-      message("Multiple rows found for tag_effects in state: ", state, " and tag_type: ", tag)
-    }
-  }
-}
-
-# Plot the probabilities with credible intervals
-ggplot(probabilities, aes(x = Tag_Type, y = Probability, color = Tag_Type)) +
-  geom_point(size = 3) +  # Add points for the probabilities
-  geom_errorbar(aes(ymin = `l-95% CI`, ymax = `u-95% CI`), width = 0.2) +  # Add vertical error bars for the credible intervals
-  facet_wrap(~State, scales = "free_y") +  # Facet by state with free y-axis scales
-  scale_color_manual(values = c("control" = "blue", "PTT" = "red", "GPS" = "green", "other" = "purple")) +  # Customize colors for each tag_type
-  theme_minimal() +  # Use a minimal theme
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
-        strip.text = element_text(size = 12),  # Increase size of facet labels
-        legend.position = "none") +  # Remove legend (optional)
-  labs(x = "Tag Type", y = "Probability", title = "Probabilities with 95% Credible Intervals")
-
-# Extract the intercepts
-intercepts <- fixed_effects_df %>%
-  filter(grepl("Intercept", Parameter))
-
-# Extract the tag type effects
-tag_effects <- fixed_effects_df %>%
-  filter(grepl("tag_type", Parameter))
-
-# Calculate the probabilities for each state, including credible intervals
-states <- unique(data$state)
-tag_types <- unique(data$tag_type)
-probabilities <- data.frame(State = character(), 
-                             Tag_Type = character(), 
-                             Probability = numeric(), 
-                             `l-95% CI` = numeric(), 
-                             `u-95% CI` = numeric())
-
-for (state in states) {
-  intercept <- intercepts %>% filter(grepl(state, Parameter)) 
-  intercept_est <- intercept$Estimate
-  intercept_lower <- intercept$`l-95% CI`
-  intercept_upper <- intercept$`u-95% CI`
-  
-  for (tag in tag_types) {
-    for (i in 1:nrow())
-    tag_effect <- tag_effects %>% filter(grepl(paste0("tag_type", tag), Parameter)) 
-    tag_est <- tag_effect$Estimate
-    tag_lower <- tag_effect$`l-95% CI`
-    tag_upper <- tag_effect$`u-95% CI`
-    
-    # Calculate the log odds for the intercept and tag type effect
-    log_odds_est <- intercept_est + tag_est
-    log_odds_lower <- intercept_lower + tag_lower
-    log_odds_upper <- intercept_upper + tag_upper
-    
-    # Convert log odds to probabilities
-    prob_est <- log_odds_to_prob(log_odds_est)
-    prob_lower <- log_odds_to_prob(log_odds_lower)
-    prob_upper <- log_odds_to_prob(log_odds_upper)
-    
-    # Store the results
-    probabilities <- rbind(probabilities, data.frame(State = state, 
-                                                     Tag_Type = tag, 
-                                                     Probability = prob_est, 
-                                                     `l-95% CI` = prob_lower, 
-                                                     `u-95% CI` = prob_upper))
-  }
-}
-
-# Print the probabilities with credible intervals
-print(probabilities)
-
-# Select and rename columns for clarity
-plot_data <-
-  fixed_effects_df %>%
-  dplyr::select(Parameter, Estimate, `l-95% CI`, `u-95% CI`) %>%
-  rename(Estimate = Estimate, 
-         Q2.5 = `l-95% CI`, 
-         Q97.5 = `u-95% CI`) #%>% 
-  # filter(grepl("tag_type", Parameter)) %>% 
-  # filter(str_detect("muunkn", Parameter, negate = TRUE)) # Filter to include only the effects of interest (e.g., tag_type)
-
-# Create the forest plot
-ggplot(plot_data, aes(x = Estimate, y = Parameter)) +
-  geom_point(size = 3) +
-  geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
-  theme_minimal() +
-  labs(title = "Effect Sizes of Tag Type on Nest State",
-       x = "Estimate",
-       y = "Tag Type") +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "red")
-
-# Reorder the levels for plotting
-# plot_data$Parameter <- factor(plot_data$Parameter, 
-
-# Plot diagnostics
-plot(model_brm)
-
-# Check R-hat values
-rhat(model_brm)
-
-# Check effective sample sizes
-neff_ratio(model_brm)
-
-# Posterior predictive checks
-pp_check(model_brm)
-
-# Generate predictions from the posterior distribution
-y_rep <- posterior_predict(model_brm)
-
-# Compare summary statistics (e.g., mean, variance) of observed vs. predicted data
-pp_check(model_brm, type = "stat", stat = "mean")
-pp_check(model_brm, type = "stat", stat = "var")
-
-# Predicted counts
-predicted_counts <- apply(y_rep, 2, function(col) table(factor(col, levels = levels(nest_fates$state))))
-predicted_counts <- colMeans(predicted_counts)
-
-# Observed counts
-observed_counts <- table(nest_fates$state)
-
-# Combine into a data frame for plotting
-validation_data <- data.frame(
-  state = levels(nest_fates$state),
-  observed = as.vector(observed_counts),
-  predicted = as.vector(predicted_counts)
-)
-
-# Plotting observed vs predicted counts
-library(ggplot2)
-ggplot(validation_data, aes(x = state)) +
-  geom_bar(aes(y = observed, fill = "Observed"), stat = "identity", position = "dodge") +
-  geom_bar(aes(y = predicted, fill = "Predicted"), stat = "identity", position = "dodge") +
-  scale_fill_manual(name = "Count Type", values = c("Observed" = "blue", "Predicted" = "red")) +
-  labs(title = "Observed vs Predicted Counts", x = "State", y = "Count")
-
-
-# Residual diagnostics
-residuals <- residuals(model)
-plot(residuals)
-
-# Fit the mixed-effects logistic regression model
-model <- glmer(state ~ tag_type + (1 | season) + (1 | parent), 
-               data = nest_fates, 
-               family = binomial)
-
-# Check the model summary
-summary(model)
-
-state_summary <-
-  bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
-  mutate(nest_id = paste(year(date), nest_id, sep = "_")) %>% 
-  filter(!is.na(state)) %>% 
-  group_by(nest_id, parent, tag_type) %>%
-  dplyr::summarise(state = min(as.numeric(state), na.rm = TRUE)) %>% 
-  group_by(tag_type, state) %>% 
-  summarise(n_nests = n_distinct(nest_id)) %>% 
-  mutate(state = ifelse(state == 1, "fail", 
-                        ifelse(state == 2, "aband", 
-                               ifelse(state == 3, "brood", 
-                                      ifelse(state == 4, "unkn", "xxx"))))) %>% 
-  ungroup() %>% 
-  bind_rows(., data.frame(tag_type = c("GPS", "PTT"), 
-                          state = c("aband", "unkn"), 
-                          n_nests = c(0, 0)))
-
-data = state_summary
-
-# Calculate the total number of nests for each treatment group
-totals <- tapply(data$n_nests, data$tag_type, sum)
-
-# Add proportions to the data frame
-data$proportion <- with(data, n_nests / totals[tag_type])
-
-# Function to perform pairwise comparison for a given state
-pairwise_prop_test <- function(data, group1, group2, state) {
-  subset_data <- data[data$state == state & data$tag_type %in% c(group1, group2), ]
-  counts <- subset_data$n_nests
-  n <- totals[c(group1, group2)]
-  prop.test(counts, n)
-}
-
-
-# List of states
-states <- unique(data$state)
-
-# List of group pairs to compare
-group_pairs <- list(c("GPS", "control"), c("PTT", "control"), c("PTT", "GPS"))
-
-# Perform pairwise comparisons for each state and each group pair
-results <- list()
-
-for (state in states) {
-  for (pair in group_pairs) {
-    test_result <- pairwise_prop_test(data, pair[1], pair[2], state)
-    results[[paste(state, pair[1], "vs", pair[2])]] <- test_result
-  }
-}
-
-# Print results
-for (name in names(results)) {
-  cat("\nComparison:", name, "\n")
-  print(results[[name]])
-}
-
-
-
-contingency_table <- xtabs(proportion ~ tag_type + state, data = state_summary)
-chi_square_test <- chisq.test(contingency_table)
-chi_square_test
-
-# Perform Fisher's exact test
-fisher_test <- fisher.test(contingency_table)
-
-# View the results
-fisher_test
-
-breeding_data_2021 %>% 
-  filter(state == "incub") %>% View()
-
-  #pull(state) %>% table()
-  # filter(parent %in% (dat %>% filter(season == 2021) %>% pull(rings_comb) %>% unique())) %>%
-  filter(nest_fate == "Occupied" | as.numeric(chicks) > 0) %>%
-  group_by(parent) %>%
-  arrange(desc(date)) %>%
-  slice(1) %>%
-  ungroup() %>%
-  arrange(desc(date)) %>%
-  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>%
-  rename(last_date_breeding = date) %>% 
-  select(parent, last_date_breeding, nest_id, OBJECTID)
-
-# import and consolidate key columns
-breeding_data_2021_ <-
-  read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
-                     sheet = "Kaikoura_DotterelNest2021_0", 
-                     col_types = "text") %>%
-  mutate(hatch_date_ = as.POSIXct(as.numeric(`Date Hatched`) * 86400, origin = "1899-12-30", tz = "UTC"),
-         fail_date_ = as.POSIXct(as.numeric(`Date Failed`) * 86400, origin = "1899-12-30", tz = "UTC"),
-         found_date_ = as.POSIXct(as.numeric(`Date Found`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
-  mutate(hatch_date_nz = with_tz(hatch_date_, tzone = "Pacific/Auckland"),
-         fail_date_nz = with_tz(fail_date_, tzone = "Pacific/Auckland"),
-         found_date_nz = with_tz(found_date_, tzone = "Pacific/Auckland")) %>% 
-  mutate(hatch_date = as.Date(hatch_date_nz),
-         fail_date = as.Date(fail_date_nz),
-         found_date = as.Date(found_date_nz)) %>%
-  mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", `Nest ID`)) %>% 
-  select(OBJECTID, nest_id, found_date, hatch_date, fail_date)
-
-left_join(breeding_data_2021, breeding_data_2021_, by = "nest_id") %>%
-  mutate(date_check = ifelse((!is.na(found_date) & is.na(fail_date) & is.na(hatch_date)) | 
-                               ((!is.na(hatch_date) & found_date < hatch_date)) | 
-                               ((!is.na(fail_date) & !is.na(hatch_date)) & hatch_date < fail_date) |
-                               ((!is.na(fail_date) & found_date < fail_date)), 1, 0)) %>% 
-  group_by(parent) %>% 
-  mutate(last_date_breeding_ = max(found_date, hatch_date, fail_date, na.rm = TRUE)) %>% 
-  mutate(days_diff = last_date_breeding_ - last_date_breeding) %>% 
-  arrange(desc(days_diff)) %>% 
-  mutate(last_date_breeding_final = as.Date(ifelse(days_diff > 0, last_date_breeding + ceiling(days_diff/2), last_date_breeding))) %>% 
-  arrange(desc(last_date_breeding_final)) %>% 
-  select(parent, last_date_breeding_final) %>% 
-  # specify the season as the first calender year
-  mutate(season = ifelse(month(last_date_breeding_final) < 7, year(last_date_breeding_final) - 1, year(last_date_breeding_final)))
+# # Perform pairwise comparisons for tag_type effects
+# hypothesis(model_brm, "tag_typeGPS > control")
+# hypothesis(model_brm, "tag_typePTT > control")
+# 
+# # Summarize the coefficients
+# tag_type_summary <- posterior_summary(tag_type_coeffs)
+# print(tag_type_summary)
+# 
+# # View the structure of the posterior samples
+# str(post_samples)
+# 
+# # Extract fixed effects summary
+# fixed_effects <- 
+#   summary(model_brm)$fixed
+# 
+# # Create a data frame for easier manipulation
+# fixed_effects_df <- as.data.frame(fixed_effects)
+# fixed_effects_df$Parameter <- rownames(fixed_effects_df)
+# 
+# # Select and rename columns for clarity
+# plot_data <-
+#   fixed_effects_df %>%
+#   dplyr::select(Parameter, Estimate, `l-95% CI`, `u-95% CI`) %>%
+#   rename(Estimate = Estimate, 
+#          Q2.5 = `l-95% CI`, 
+#          Q97.5 = `u-95% CI`) %>%
+#   filter(Parameter %!in% c("muunkn_tag_typePTT", "muaband_tag_typeGPS")) %>% 
+#   filter(str_detect(Parameter, "unkn", negate = TRUE))
+#   # filter(grepl("tag_type", Parameter)) %>% 
+#   # filter(str_detect("muunkn", Parameter, negate = TRUE)) # Filter to include only the effects of interest (e.g., tag_type)
+# 
+# # Create the forest plot
+# ggplot(plot_data, aes(x = Estimate, y = Parameter)) +
+#   geom_point(size = 3) +
+#   geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+#   theme_minimal() +
+#   labs(title = "Effect Sizes of Tag Type on Nest State",
+#        x = "Estimate",
+#        y = "Tag Type") +
+#   geom_vline(xintercept = 0, linetype = "dashed", color = "red")
+# 
+# ##
+# fixed_effects_df["muaband_tag_typeGPS", "Estimate"] <-
+#   fixed_effects_df["muaband_tag_typeGPS", "Estimate"] + fixed_effects_df["muaband_Intercept", "Estimate"]
+# 
+# fixed_effects_df["muaband_tag_typePTT", "Estimate"] <-
+#   fixed_effects_df["muaband_tag_typePTT", "Estimate"] + fixed_effects_df["muaband_Intercept", "Estimate"]
+# 
+# fixed_effects_df["mubrood_tag_typeGPS", "Estimate"] <-
+#   fixed_effects_df["mubrood_tag_typeGPS", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
+# 
+# fixed_effects_df["mufail_tag_typecontrol", "Estimate"] <-
+#   fixed_effects_df["mufail_tag_typecontrol", "Estimate"] + fixed_effects_df["mufail_Intercept", "Estimate"]
+# 
+# fixed_effects_df["mufail_tag_typePTT", "Estimate"] <-
+#   fixed_effects_df["mufail_tag_typePTT", "Estimate"] + fixed_effects_df["mufail_Intercept", "Estimate"]
+# 
+# fixed_effects_df["mubrood_tag_typecontrol", "Estimate"] <-
+#   fixed_effects_df["mubrood_tag_typecontrol", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
+# 
+# fixed_effects_df["mubrood_tag_typePTT", "Estimate"] <-
+#   fixed_effects_df["mubrood_tag_typePTT", "Estimate"] + fixed_effects_df["mubrood_Intercept", "Estimate"]
+# ##
+# fixed_effects_df["muaband_tag_typeGPS", "lci"] <-
+#   fixed_effects_df["muaband_tag_typeGPS", "lci"] + fixed_effects_df["muaband_Intercept", "lci"]
+# 
+# fixed_effects_df["muaband_tag_typePTT", "lci"] <-
+#   fixed_effects_df["muaband_tag_typePTT", "lci"] + fixed_effects_df["muaband_Intercept", "lci"]
+# 
+# fixed_effects_df["mubrood_tag_typeGPS", "lci"] <-
+#   fixed_effects_df["mubrood_tag_typeGPS", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
+# 
+# fixed_effects_df["mufail_tag_typecontrol", "lci"] <-
+#   fixed_effects_df["mufail_tag_typecontrol", "lci"] + fixed_effects_df["mufail_Intercept", "lci"]
+# 
+# fixed_effects_df["mufail_tag_typePTT", "lci"] <-
+#   fixed_effects_df["mufail_tag_typePTT", "lci"] + fixed_effects_df["mufail_Intercept", "lci"]
+# 
+# fixed_effects_df["mubrood_tag_typecontrol", "lci"] <-
+#   fixed_effects_df["mubrood_tag_typecontrol", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
+# 
+# fixed_effects_df["mubrood_tag_typePTT", "lci"] <-
+#   fixed_effects_df["mubrood_tag_typePTT", "lci"] + fixed_effects_df["mubrood_Intercept", "lci"]
+# ##
+# fixed_effects_df["muaband_tag_typeGPS", "uci"] <-
+#   fixed_effects_df["muaband_tag_typeGPS", "uci"] + fixed_effects_df["muaband_Intercept", "uci"]
+# 
+# fixed_effects_df["muaband_tag_typePTT", "uci"] <-
+#   fixed_effects_df["muaband_tag_typePTT", "uci"] + fixed_effects_df["muaband_Intercept", "uci"]
+# 
+# fixed_effects_df["mubrood_tag_typeGPS", "uci"] <-
+#   fixed_effects_df["mubrood_tag_typeGPS", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
+# 
+# fixed_effects_df["mufail_tag_typecontrol", "uci"] <-
+#   fixed_effects_df["mufail_tag_typecontrol", "uci"] + fixed_effects_df["mufail_Intercept", "uci"]
+# 
+# fixed_effects_df["mufail_tag_typePTT", "uci"] <-
+#   fixed_effects_df["mufail_tag_typePTT", "uci"] + fixed_effects_df["mufail_Intercept", "uci"]
+# 
+# fixed_effects_df["mubrood_tag_typecontrol", "uci"] <-
+#   fixed_effects_df["mubrood_tag_typecontrol", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
+# 
+# fixed_effects_df["mubrood_tag_typePTT", "uci"] <-
+#   fixed_effects_df["mubrood_tag_typePTT", "uci"] + fixed_effects_df["mubrood_Intercept", "uci"]
+# 
+# # Function to calculate probabilities from log odds
+# log_odds_to_prob <- function(log_odds) {
+#   exp(log_odds) / (1 + exp(log_odds))
+# }
+# 
+# fixed_effects_df_ <- 
+#   fixed_effects_df %>%
+#   filter(!is.na(Estimate)) %>% 
+#   mutate(across(c(Estimate, lci, uci), log_odds_to_prob)) %>% 
+#   as.tibble()
+# 
+# fixed_effects_df_a_b_G_P
+# 
+# fixed_effects_df_f_b_c_P <- 
+#   fixed_effects_df_
+# 
+# # Extract fixed effects summary
+# fixed_effects <- summary(model_brm)$fixed
+# 
+# # Create a data frame for easier manipulation
+# fixed_effects_df <- as.data.frame(fixed_effects)
+# fixed_effects_df$Parameter <- rownames(fixed_effects_df)
+# 
+# # Function to calculate probabilities from log odds
+# log_odds_to_prob <- function(log_odds) {
+#   exp(log_odds) / (1 + exp(log_odds))
+# }
+# 
+# # Extract the intercepts
+# intercepts <- fixed_effects_df %>%
+#   filter(grepl("Intercept", Parameter))
+# 
+# # Extract the tag type effects
+# tag_effects <- fixed_effects_df %>%
+#   filter(grepl("tag_type", Parameter))
+# 
+# # Calculate the probabilities for each state, including credible intervals
+# states <- unique(data$state)
+# probabilities <- data.frame(State = character(), 
+#                              Tag_Type = character(), 
+#                              Probability = numeric(), 
+#                              `l-95% CI` = numeric(), 
+#                              `u-95% CI` = numeric())
+# 
+# for (state in states) {
+#   intercept <- intercepts %>% filter(grepl(state, Parameter)) 
+#   intercept_est <- intercept$Estimate
+#   intercept_lower <- intercept$`l-95% CI`
+#   intercept_upper <- intercept$`u-95% CI`
+#   
+#   for (tag in levels(data$tag_type)) {
+#     tag_effect <- tag_effects %>% 
+#       filter(grepl(paste0("tag_type", tag), Parameter) & grepl(state, Parameter))
+#     
+#     # Ensure we are getting only 1 row for tag effect (should be one for each state)
+#     if (nrow(tag_effect) == 1) {
+#       tag_est <- tag_effect$Estimate
+#       tag_lower <- tag_effect$Q2.5
+#       tag_upper <- tag_effect$Q97.5
+#       
+#       # Calculate the log odds for the intercept and tag type effect
+#       log_odds_est <- intercept_est + tag_est
+#       log_odds_lower <- intercept_lower + tag_lower
+#       log_odds_upper <- intercept_upper + tag_upper
+#       
+#       # Convert log odds to probabilities
+#       prob_est <- log_odds_to_prob(log_odds_est)
+#       prob_lower <- log_odds_to_prob(log_odds_lower)
+#       prob_upper <- log_odds_to_prob(log_odds_upper)
+#       
+#       # Store the results
+#       probabilities <- rbind(probabilities, data.frame(State = state, 
+#                                                        Tag_Type = tag, 
+#                                                        Probability = prob_est, 
+#                                                        `l-95% CI` = prob_lower, 
+#                                                        `u-95% CI` = prob_upper))
+#     } else {
+#       message("Multiple rows found for tag_effects in state: ", state, " and tag_type: ", tag)
+#     }
+#   }
+# }
+# 
+# # Plot the probabilities with credible intervals
+# ggplot(probabilities, aes(x = Tag_Type, y = Probability, color = Tag_Type)) +
+#   geom_point(size = 3) +  # Add points for the probabilities
+#   geom_errorbar(aes(ymin = `l-95% CI`, ymax = `u-95% CI`), width = 0.2) +  # Add vertical error bars for the credible intervals
+#   facet_wrap(~State, scales = "free_y") +  # Facet by state with free y-axis scales
+#   scale_color_manual(values = c("control" = "blue", "PTT" = "red", "GPS" = "green", "other" = "purple")) +  # Customize colors for each tag_type
+#   theme_minimal() +  # Use a minimal theme
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+#         strip.text = element_text(size = 12),  # Increase size of facet labels
+#         legend.position = "none") +  # Remove legend (optional)
+#   labs(x = "Tag Type", y = "Probability", title = "Probabilities with 95% Credible Intervals")
+# 
+# # Extract the intercepts
+# intercepts <- fixed_effects_df %>%
+#   filter(grepl("Intercept", Parameter))
+# 
+# # Extract the tag type effects
+# tag_effects <- fixed_effects_df %>%
+#   filter(grepl("tag_type", Parameter))
+# 
+# # Calculate the probabilities for each state, including credible intervals
+# states <- unique(data$state)
+# tag_types <- unique(data$tag_type)
+# probabilities <- data.frame(State = character(), 
+#                              Tag_Type = character(), 
+#                              Probability = numeric(), 
+#                              `l-95% CI` = numeric(), 
+#                              `u-95% CI` = numeric())
+# 
+# for (state in states) {
+#   intercept <- intercepts %>% filter(grepl(state, Parameter)) 
+#   intercept_est <- intercept$Estimate
+#   intercept_lower <- intercept$`l-95% CI`
+#   intercept_upper <- intercept$`u-95% CI`
+#   
+#   for (tag in tag_types) {
+#     for (i in 1:nrow())
+#     tag_effect <- tag_effects %>% filter(grepl(paste0("tag_type", tag), Parameter)) 
+#     tag_est <- tag_effect$Estimate
+#     tag_lower <- tag_effect$`l-95% CI`
+#     tag_upper <- tag_effect$`u-95% CI`
+#     
+#     # Calculate the log odds for the intercept and tag type effect
+#     log_odds_est <- intercept_est + tag_est
+#     log_odds_lower <- intercept_lower + tag_lower
+#     log_odds_upper <- intercept_upper + tag_upper
+#     
+#     # Convert log odds to probabilities
+#     prob_est <- log_odds_to_prob(log_odds_est)
+#     prob_lower <- log_odds_to_prob(log_odds_lower)
+#     prob_upper <- log_odds_to_prob(log_odds_upper)
+#     
+#     # Store the results
+#     probabilities <- rbind(probabilities, data.frame(State = state, 
+#                                                      Tag_Type = tag, 
+#                                                      Probability = prob_est, 
+#                                                      `l-95% CI` = prob_lower, 
+#                                                      `u-95% CI` = prob_upper))
+#   }
+# }
+# 
+# # Print the probabilities with credible intervals
+# print(probabilities)
+# 
+# # Select and rename columns for clarity
+# plot_data <-
+#   fixed_effects_df %>%
+#   dplyr::select(Parameter, Estimate, `l-95% CI`, `u-95% CI`) %>%
+#   rename(Estimate = Estimate, 
+#          Q2.5 = `l-95% CI`, 
+#          Q97.5 = `u-95% CI`) #%>% 
+#   # filter(grepl("tag_type", Parameter)) %>% 
+#   # filter(str_detect("muunkn", Parameter, negate = TRUE)) # Filter to include only the effects of interest (e.g., tag_type)
+# 
+# # Create the forest plot
+# ggplot(plot_data, aes(x = Estimate, y = Parameter)) +
+#   geom_point(size = 3) +
+#   geom_errorbarh(aes(xmin = Q2.5, xmax = Q97.5), height = 0.2) +
+#   theme_minimal() +
+#   labs(title = "Effect Sizes of Tag Type on Nest State",
+#        x = "Estimate",
+#        y = "Tag Type") +
+#   geom_vline(xintercept = 0, linetype = "dashed", color = "red")
+# 
+# # Reorder the levels for plotting
+# # plot_data$Parameter <- factor(plot_data$Parameter, 
+# 
+# # Plot diagnostics
+# plot(model_brm)
+# 
+# # Check R-hat values
+# rhat(model_brm)
+# 
+# # Check effective sample sizes
+# neff_ratio(model_brm)
+# 
+# # Posterior predictive checks
+# pp_check(model_brm)
+# 
+# # Generate predictions from the posterior distribution
+# y_rep <- posterior_predict(model_brm)
+# 
+# # Compare summary statistics (e.g., mean, variance) of observed vs. predicted data
+# pp_check(model_brm, type = "stat", stat = "mean")
+# pp_check(model_brm, type = "stat", stat = "var")
+# 
+# # Predicted counts
+# predicted_counts <- apply(y_rep, 2, function(col) table(factor(col, levels = levels(nest_fates$state))))
+# predicted_counts <- colMeans(predicted_counts)
+# 
+# # Observed counts
+# observed_counts <- table(nest_fates$state)
+# 
+# # Combine into a data frame for plotting
+# validation_data <- data.frame(
+#   state = levels(nest_fates$state),
+#   observed = as.vector(observed_counts),
+#   predicted = as.vector(predicted_counts)
+# )
+# 
+# # Plotting observed vs predicted counts
+# ggplot(validation_data, aes(x = state)) +
+#   geom_bar(aes(y = observed, fill = "Observed"), stat = "identity", position = "dodge") +
+#   geom_bar(aes(y = predicted, fill = "Predicted"), stat = "identity", position = "dodge") +
+#   scale_fill_manual(name = "Count Type", values = c("Observed" = "blue", "Predicted" = "red")) +
+#   labs(title = "Observed vs Predicted Counts", x = "State", y = "Count")
+# 
+# 
+# # Residual diagnostics
+# residuals <- residuals(model)
+# plot(residuals)
+# 
+# # Fit the mixed-effects logistic regression model
+# model <- glmer(state ~ tag_type + (1 | season) + (1 | parent), 
+#                data = nest_fates, 
+#                family = binomial)
+# 
+# # Check the model summary
+# summary(model)
+# 
+# state_summary <-
+#   bind_rows(breeding_data_2021, breeding_data_2022, breeding_data_2023) %>%
+#   mutate(nest_id = paste(year(date), nest_id, sep = "_")) %>% 
+#   filter(!is.na(state)) %>% 
+#   group_by(nest_id, parent, tag_type) %>%
+#   dplyr::summarise(state = min(as.numeric(state), na.rm = TRUE)) %>% 
+#   group_by(tag_type, state) %>% 
+#   summarise(n_nests = n_distinct(nest_id)) %>% 
+#   mutate(state = ifelse(state == 1, "fail", 
+#                         ifelse(state == 2, "aband", 
+#                                ifelse(state == 3, "brood", 
+#                                       ifelse(state == 4, "unkn", "xxx"))))) %>% 
+#   ungroup() %>% 
+#   bind_rows(., data.frame(tag_type = c("GPS", "PTT"), 
+#                           state = c("aband", "unkn"), 
+#                           n_nests = c(0, 0)))
+# 
+# data = state_summary
+# 
+# # Calculate the total number of nests for each treatment group
+# totals <- tapply(data$n_nests, data$tag_type, sum)
+# 
+# # Add proportions to the data frame
+# data$proportion <- with(data, n_nests / totals[tag_type])
+# 
+# # Function to perform pairwise comparison for a given state
+# pairwise_prop_test <- function(data, group1, group2, state) {
+#   subset_data <- data[data$state == state & data$tag_type %in% c(group1, group2), ]
+#   counts <- subset_data$n_nests
+#   n <- totals[c(group1, group2)]
+#   prop.test(counts, n)
+# }
+# 
+# 
+# # List of states
+# states <- unique(data$state)
+# 
+# # List of group pairs to compare
+# group_pairs <- list(c("GPS", "control"), c("PTT", "control"), c("PTT", "GPS"))
+# 
+# # Perform pairwise comparisons for each state and each group pair
+# results <- list()
+# 
+# for (state in states) {
+#   for (pair in group_pairs) {
+#     test_result <- pairwise_prop_test(data, pair[1], pair[2], state)
+#     results[[paste(state, pair[1], "vs", pair[2])]] <- test_result
+#   }
+# }
+# 
+# # Print results
+# for (name in names(results)) {
+#   cat("\nComparison:", name, "\n")
+#   print(results[[name]])
+# }
+# 
+# 
+# 
+# contingency_table <- xtabs(proportion ~ tag_type + state, data = state_summary)
+# chi_square_test <- chisq.test(contingency_table)
+# chi_square_test
+# 
+# # Perform Fisher's exact test
+# fisher_test <- fisher.test(contingency_table)
+# 
+# # View the results
+# fisher_test
+# 
+# breeding_data_2021 %>% 
+#   filter(state == "incub") %>% View()
+# 
+#   #pull(state) %>% table()
+#   # filter(parent %in% (dat %>% filter(season == 2021) %>% pull(rings_comb) %>% unique())) %>%
+#   filter(nest_fate == "Occupied" | as.numeric(chicks) > 0) %>%
+#   group_by(parent) %>%
+#   arrange(desc(date)) %>%
+#   slice(1) %>%
+#   ungroup() %>%
+#   arrange(desc(date)) %>%
+#   mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", NestID)) %>%
+#   rename(last_date_breeding = date) %>% 
+#   select(parent, last_date_breeding, nest_id, OBJECTID)
+# 
+# # import and consolidate key columns
+# breeding_data_2021_ <-
+#   read_excel(here("data/Kaikoura_Dotterel_2021_Feb2022_upd_Nov22_Locations.xlsx"), 
+#                      sheet = "Kaikoura_DotterelNest2021_0", 
+#                      col_types = "text") %>%
+#   mutate(hatch_date_ = as.POSIXct(as.numeric(`Date Hatched`) * 86400, origin = "1899-12-30", tz = "UTC"),
+#          fail_date_ = as.POSIXct(as.numeric(`Date Failed`) * 86400, origin = "1899-12-30", tz = "UTC"),
+#          found_date_ = as.POSIXct(as.numeric(`Date Found`) * 86400, origin = "1899-12-30", tz = "UTC")) %>% 
+#   mutate(hatch_date_nz = with_tz(hatch_date_, tzone = "Pacific/Auckland"),
+#          fail_date_nz = with_tz(fail_date_, tzone = "Pacific/Auckland"),
+#          found_date_nz = with_tz(found_date_, tzone = "Pacific/Auckland")) %>% 
+#   mutate(hatch_date = as.Date(hatch_date_nz),
+#          fail_date = as.Date(fail_date_nz),
+#          found_date = as.Date(found_date_nz)) %>%
+#   mutate(nest_id = sub("^([^[:space:]]+).*", "\\1", `Nest ID`)) %>% 
+#   select(OBJECTID, nest_id, found_date, hatch_date, fail_date)
+# 
+# left_join(breeding_data_2021, breeding_data_2021_, by = "nest_id") %>%
+#   mutate(date_check = ifelse((!is.na(found_date) & is.na(fail_date) & is.na(hatch_date)) | 
+#                                ((!is.na(hatch_date) & found_date < hatch_date)) | 
+#                                ((!is.na(fail_date) & !is.na(hatch_date)) & hatch_date < fail_date) |
+#                                ((!is.na(fail_date) & found_date < fail_date)), 1, 0)) %>% 
+#   group_by(parent) %>% 
+#   mutate(last_date_breeding_ = max(found_date, hatch_date, fail_date, na.rm = TRUE)) %>% 
+#   mutate(days_diff = last_date_breeding_ - last_date_breeding) %>% 
+#   arrange(desc(days_diff)) %>% 
+#   mutate(last_date_breeding_final = as.Date(ifelse(days_diff > 0, last_date_breeding + ceiling(days_diff/2), last_date_breeding))) %>% 
+#   arrange(desc(last_date_breeding_final)) %>% 
+#   select(parent, last_date_breeding_final) %>% 
+#   # specify the season as the first calender year
+#   mutate(season = ifelse(month(last_date_breeding_final) < 7, year(last_date_breeding_final) - 1, year(last_date_breeding_final)))
 ```
 
