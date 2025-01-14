@@ -79,7 +79,7 @@ packages_required_in_project <-
     "here", "hms", "lme4", "lubridate", "mapview", "mgcv", "multcomp", "MuMIn", "nnet", 
     "partR2", "patchwork", "RColorBrewer", "readxl", "remotes", "RMark", "rnaturalearth", 
     "rptR", "scales", "sf", "showtext", "smatr", "sp", "stringr", "tidybayes", 
-    "tidyterra", "tidyverse")
+    "tidyterra", "tidyverse", "adehabitatLT")
 
 # of the required packages, check if some need to be installed
 new.packages <- 
@@ -2456,6 +2456,108 @@ tag_data_2024 <-
 ```
 
 ### wrangle pre-2024 PTT data
+```{r, include=FALSE, eval=FALSE}
+library(dplyr)
+library(stringr)
+library(lubridate)
+read.table("../../../argos_data/DS - 20250113085759_01.txt", sep = "\t")
+
+# Read the text file into a character vector
+file_path <- "../../../argos_data/DS - 20250113085759_01.txt"  # Replace with your file path
+lines <- readLines(file_path)
+
+lines <- lines[1:10]
+
+# Initialize an empty list to store parsed data
+parsed_data <- list()
+
+# Variables to store the current block data
+current_block <- list()
+current_header <- NULL
+
+# Function to parse the header line
+parse_header <- function(header_line) {
+  parts <- str_split_fixed(header_line, "\\s+", 10)
+  list(
+    program_id = parts[1],
+    tag_id = parts[2],
+    msg = parts[5],
+    loc_quality = parts[6],
+    loc_date = ymd_hms(parts[7], tz = "UTC"),
+    lat = as.numeric(parts[8]),
+    lon = as.numeric(parts[9]),
+    altitude = as.numeric(parts[10]),
+    freq = parts[11]
+  )
+}
+
+# Function to parse sub-lines
+parse_sublines <- function(subline) {
+  parts <- str_split_fixed(subline, "\\s+", 9)
+  list(
+    msg_date = ymd_hms(parts[1], tz = "UTC"),
+    sensor_01 = as.numeric(parts[3]),
+    sensor_02 = as.numeric(parts[4]),
+    sensor_03 = as.numeric(parts[5]),
+    sensor_04 = as.numeric(parts[6]),
+    sensor_05 = as.numeric(parts[7]),
+    sensor_06 = as.numeric(parts[8]),
+    sensor_07 = as.numeric(parts[9]),
+    sensor_08 = as.numeric(parts[10])
+  )
+}
+
+# Process each line
+for (line in lines) {
+  if (str_starts(line, "06229")) {
+    # Save the previous block if it exists
+    if (!is.null(current_header)) {
+      parsed_data <- append(parsed_data, list(current_block))
+    }
+    # Parse the new header
+    current_header <- parse_header(line)
+    current_block <- list(header = current_header, sublines = list())
+  } else if (str_detect(line, "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}")) {
+    # Parse sublines
+    if (str_starts(line, "      1")) {
+      subline_data <- parse_sublines(line)
+      current_block$sublines <- append(current_block$sublines, list(subline_data))
+    }
+  }
+}
+
+# Save the last block
+if (!is.null(current_header)) {
+  parsed_data <- append(parsed_data, list(current_block))
+}
+
+# Flatten the list into a dataframe
+flattened_data <- bind_rows(lapply(parsed_data, function(block) {
+  # If there are no sublines, create an empty row for sublines
+  if (length(block$sublines) == 0) {
+    sublines <- tibble(
+      msg_date = NA,
+      sensor_01 = NA,
+      sensor_02 = NA,
+      sensor_03 = NA,
+      sensor_04 = NA,
+      sensor_05 = NA,
+      sensor_06 = NA,
+      sensor_07 = NA,
+      sensor_08 = NA
+    )
+  } else {
+    sublines <- bind_rows(block$sublines)
+  }
+  cbind(block$header, sublines)
+}))
+
+# View the result
+print(flattened_data)
+
+
+```
+
 ```{r}
 # wrangle KK PTT data
 tag_date_info <-
@@ -2477,7 +2579,8 @@ pre_2024_argos_data <-
 
 pre_2024_argos_data %>% pull(tagID) %>% unique() %>% paste(collapse = ", ")
 
-read.table("../../../argos_data/DIAG - 20250113090548_01.txt", sep = "\t")
+read.csv("../../../argos_data/PRG 6229_20250113125455_01.csv", sep = ";")
+read.table("../../../argos_data/DS - 20250113085759_01.txt", sep = "\t")
 
 # BADO google sheets
 pre_2024_tag_data <-
@@ -2862,7 +2965,10 @@ all_BADO_tagging_data_sf <-
   st_as_sf(., 
            coords = c("longitude", "latitude"),
            crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+```
 
+
+```{r, eval = FALSE}
 max_dist_location <-
   all_BADO_tagging_data_sf %>% 
   # BADO_caps %>% 
@@ -3273,7 +3379,8 @@ mp_loop_pred_fun <- function(argos_data, time_step = 24, velocity_max = 0.05){
                       # distlim = c(0, 50),
                       time.step = time_step,
                       control = ssm_control(verbose = 0),
-                      map = list(psi = factor(NA)))
+                      map = list(psi = factor(NA),
+                                 rho_o = factor(NA)))
     fit_mp_pred_trans_df <- 
       fit_mp$ssm[[1]]$predicted %>% 
       sf::st_transform(st_crs("+proj=longlat +datum=WGS84 +no_defs")) %>% 
@@ -3284,8 +3391,19 @@ mp_loop_pred_fun <- function(argos_data, time_step = 24, velocity_max = 0.05){
   return(fit_df)
 }
 
+# fit_ssm(argos_pre2024 %>% filter(id == "234672"), 
+#                       vmax = 0.05, 
+#                       model = "mp", 
+#                       # distlim = c(0, 50),
+#                       time.step = 24,
+#                       control = ssm_control(verbose = 0),
+#                       map = list(psi = factor(NA),
+#                                  rho_o = factor(NA)))
+# 
+# argos_pre2024 %>% filter(id == "234672") %>% View()
+
 mp_pred <- 
-  mp_loop_pred_fun(argos_data = argos_pre2024) %>% 
+  mp_loop_pred_fun(argos_data = argos_pre2024) %>% #filter(argos_pre2024, id %in% c("66894", "66891_2", "234750", "66967", "66969", "234673", "66903", "234658", "66891_1"))) %>% 
   # left_join(., 
   #           argos_pre2024 %>% 
   #             dplyr::select(id, site) %>% 
@@ -3305,7 +3423,8 @@ mp_loop_fit_fun <- function(argos_data, time_step = 24, velocity_max = 0.05){
                       # distlim = c(0, 50),
                       time.step = time_step,
                       control = ssm_control(verbose = 0),
-                      map = list(psi = factor(NA)))
+                      map = list(psi = factor(NA),
+                                 rho_o = factor(NA)))
     fit_mp_pred_trans_df <- 
       fit_mp$ssm[[1]]$fitted %>% 
       sf::st_transform(st_crs("+proj=longlat +datum=WGS84 +no_defs")) %>% 
@@ -3327,7 +3446,10 @@ mp_fit <-
   # mutate(tmp = ifelse(id == "234681" & date < as.Date("2022-12-16"), 1, 0)) %>% 
   # filter(tmp == 0) %>% 
   # dplyr::select(-tmp)
+```
 
+
+```{r, eval=FALSE}
 # winter fixes in Kaikoura (residents)
 mp_fit %>% 
   filter(month(date) > 2 & month(date) < 8) %>% 
@@ -3340,6 +3462,11 @@ mp_fit %>%
   st_as_sf(coords = c("longitude", "latitude"), 
            crs = 4326) %>% 
   mapview(zcol = "tagID")
+
+min_lon <- 173.5
+max_lon <- 173.75
+min_lat <- -42.46
+max_lat <- -42.32
 
 # summer fixes in Kaikoura (all)
 summer_KK_data <- 
@@ -3354,8 +3481,8 @@ summer_KK_data <-
               # filter(parent %!in% c("RWLG", "RBBR", "RRRG", "RBRL", "RBOY"))
             ) %>%
   filter(longitude >= min_lon & longitude <= max_lon)
-  st_as_sf(coords = c("longitude", "latitude"), 
-           crs = 4326)
+  # st_as_sf(coords = c("longitude", "latitude"), 
+  #          crs = 4326)
 
 # Desired number of cells along each dimension
 desired_cells <- 100  # Adjust as needed
@@ -3441,8 +3568,11 @@ ggmap(KK_map_transparent)
 
 nz_bound <- gisco_get_countries(country = "New Zealand", resolution = "1")
 nz_bound_crop <- 
-  st_crop(nz_bound, c(xmin = min_lon, ymin = max_lat, xmax = max_lon, ymax = max_lat)) 
+  st_crop(nz_bound, c(xmin = min_lon, ymin = max_lat, xmax = max_lon, ymax = max_lat))
+```
 
+
+```{r, eval=FALSE}
 #### calculate distances ----
 # specify coordinate columns
 coordinates(mp_fit) <- c("longitude","latitude")
@@ -3566,9 +3696,9 @@ ggplot(data = all_BADO_tagging_data_sf_dist,
 ```
 
 
-```{r}
-KK_caps %>% 
-  filter(date_local > recapture_date)
+```{r, eval=FALSE}
+# KK_caps %>% 
+#   filter(date_local > recapture_date)
 
 BADO_PTTs_all <-
   BADO_PTTs %>% 
