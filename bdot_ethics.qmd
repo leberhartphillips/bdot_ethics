@@ -1022,55 +1022,55 @@ first_obs <-
          first_weight = weight,
          first_date = date) %>% 
   dplyr::select(ring, first_date, first_weight, first_smi_wing, tag_type, treatment_group) %>% 
-  mutate(tag_type_ = ifelse(tag_type == "PTT" & year(first_date) == 2021, "PTT2", tag_type))
+  mutate(tag_type_ = ifelse(tag_type == "PTT" & ring %in% c("CP16918", "CP9068", "CP16905"), "PTT2", tag_type))
 
-# first_obs %>% 
-#   ungroup() %>% 
-#   mutate(prop_mass_tag = ifelse(tag_type_ == "PTT2", PTT2 / first_weight,
-#                                 ifelse(tag_type_ == "PTT", PTT / first_weight,
-#                                ifelse(tag_type_ == "GPS", GPS / first_weight, 
-#                                       ifelse(tag_type_ == "control", NA, "XXX")))) %>% as.numeric(),
-#          prop_mass_all = ifelse(tag_type_ == "PTT2", (PTT2 + sum(4 * colour_band, metal_band)) / first_weight,
-#                                 ifelse(tag_type_ == "PTT", (PTT + sum(4 * colour_band, metal_band)) / first_weight,
-#                                ifelse(tag_type_ == "GPS", (GPS + sum(4 * colour_band, metal_band)) / first_weight, 
-#                                       ifelse(tag_type_ == "control", sum(4 * colour_band, metal_band) / first_weight, "XXX")))) %>% as.numeric(),
-#          prop_SMI_tag = ifelse(tag_type_ == "PTT2", PTT2 / first_smi_wing,
-#                                ifelse(tag_type_ == "PTT", PTT / first_smi_wing,
-#                                ifelse(tag_type_ == "GPS", GPS / first_smi_wing, 
-#                                       ifelse(tag_type_ == "control", NA, "XXX")))) %>% as.numeric(),
-#          prop_SMI_all = ifelse(tag_type_ == "PTT2", (PTT2 + sum(4 * colour_band, metal_band)) / first_smi_wing,
-#                                ifelse(tag_type_ == "PTT", (PTT + sum(4 * colour_band, metal_band)) / first_smi_wing,
-#                                ifelse(tag_type_ == "GPS", (GPS + sum(4 * colour_band, metal_band)) / first_smi_wing, 
-#                                       ifelse(tag_type_ == "control", sum(4 * colour_band, metal_band) / first_smi_wing, "XXX")))) %>% as.numeric()) %>% 
-#   ungroup() %>% 
-#   summarise(mean_first_smi_wing = mean(first_smi_wing, na.rm = TRUE))
-#   arrange(desc(prop_SMI_all))
-#   group_by(tag_type) %>% 
-#   summarise(mean_tag_SMI = mean(prop_SMI_tag, na.rm = TRUE) * 100,
-#             median_tag_SMI = median(prop_SMI_tag, na.rm = TRUE) * 100,
-#             # min_tag_SMI = min(prop_SMI_tag, na.rm = TRUE) * 100,
-#             # max_tag_SMI = max(prop_SMI_tag, na.rm = TRUE) * 100,
-#             # sd_tag_SMI = sd(prop_SMI_tag, na.rm = TRUE) * 100,
-#             mean_all_SMI = mean(prop_SMI_all, na.rm = TRUE) * 100,
-#             median_all_SMI = median(prop_SMI_all, na.rm = TRUE) * 100,
-#             # min_all_SMI = min(prop_SMI_all, na.rm = TRUE) * 100,
-#             # max_all_SMI = max(prop_SMI_all, na.rm = TRUE) * 100,
-#             # sd_all_SMI = sd(prop_SMI_all, na.rm = TRUE) * 100,
-#             mean_tag_mass = mean(prop_mass_tag, na.rm = TRUE) * 100,
-#             median_tag_mass = median(prop_mass_tag, na.rm = TRUE) * 100,
-#             # min_tag_mass = min(prop_mass_tag, na.rm = TRUE) * 100,
-#             # max_tag_mass = max(prop_mass_tag, na.rm = TRUE) * 100,
-#             # sd_tag_mass = sd(prop_mass_tag, na.rm = TRUE) * 100,
-#             mean_all_mass = mean(prop_mass_all, na.rm = TRUE) * 100,
-#             median_all_mass = median(prop_mass_all, na.rm = TRUE) * 100,
-#             # min_all_mass = min(prop_mass_all, na.rm = TRUE) * 100,
-#             # max_all_mass = max(prop_mass_all, na.rm = TRUE) * 100,
-#             # sd_all_mass = sd(prop_mass_all, na.rm = TRUE) * 100
-#             ) %>% 
-#   t() %>% as.data.frame() %>% rename(GPS = V1, 
-#                                                                                                         PTT = V2, 
-#                                                                                                         # PTT2 = V3, 
-#                                                                                                         control = V3) %>% slice(-1)
+first_obs %>%
+  ungroup() %>%
+  mutate(prop_mass_tag = ifelse(tag_type_ == "PTT2", PTT2 / first_weight,
+                                ifelse(tag_type_ == "PTT", PTT / first_weight,
+                               ifelse(tag_type_ == "GPS", GPS / first_weight,
+                                      ifelse(tag_type_ == "control", NA, "XXX")))) %>% as.numeric(),
+         prop_mass_all = ifelse(tag_type_ == "PTT2", (PTT2 + sum(4 * colour_band, metal_band)) / first_weight,
+                                ifelse(tag_type_ == "PTT", (PTT + sum(4 * colour_band, metal_band)) / first_weight,
+                               ifelse(tag_type_ == "GPS", (GPS + sum(4 * colour_band, metal_band)) / first_weight,
+                                      ifelse(tag_type_ == "control", sum(4 * colour_band, metal_band) / first_weight, "XXX")))) %>% as.numeric(),
+         prop_SMI_tag = ifelse(tag_type_ == "PTT2", PTT2 / first_smi_wing,
+                               ifelse(tag_type_ == "PTT", PTT / first_smi_wing,
+                               ifelse(tag_type_ == "GPS", GPS / first_smi_wing,
+                                      ifelse(tag_type_ == "control", NA, "XXX")))) %>% as.numeric(),
+         prop_SMI_all = ifelse(tag_type_ == "PTT2", (PTT2 + sum(4 * colour_band, metal_band)) / first_smi_wing,
+                               ifelse(tag_type_ == "PTT", (PTT + sum(4 * colour_band, metal_band)) / first_smi_wing,
+                               ifelse(tag_type_ == "GPS", (GPS + sum(4 * colour_band, metal_band)) / first_smi_wing,
+                                      ifelse(tag_type_ == "control", sum(4 * colour_band, metal_band) / first_smi_wing, "XXX")))) %>% as.numeric()) %>%
+  ungroup() %>%
+  # summarise(mean_first_smi_wing = mean(first_smi_wing, na.rm = TRUE))
+  # arrange(desc(prop_SMI_all))
+  group_by(tag_type) %>%
+  summarise(mean_tag_SMI = mean(prop_SMI_tag, na.rm = TRUE) * 100,
+            median_tag_SMI = median(prop_SMI_tag, na.rm = TRUE) * 100,
+            min_tag_SMI = min(prop_SMI_tag, na.rm = TRUE) * 100,
+            max_tag_SMI = max(prop_SMI_tag, na.rm = TRUE) * 100,
+            sd_tag_SMI = sd(prop_SMI_tag, na.rm = TRUE) * 100,
+            mean_all_SMI = mean(prop_SMI_all, na.rm = TRUE) * 100,
+            median_all_SMI = median(prop_SMI_all, na.rm = TRUE) * 100,
+            min_all_SMI = min(prop_SMI_all, na.rm = TRUE) * 100,
+            max_all_SMI = max(prop_SMI_all, na.rm = TRUE) * 100,
+            sd_all_SMI = sd(prop_SMI_all, na.rm = TRUE) * 100,
+            mean_tag_mass = mean(prop_mass_tag, na.rm = TRUE) * 100,
+            median_tag_mass = median(prop_mass_tag, na.rm = TRUE) * 100,
+            min_tag_mass = min(prop_mass_tag, na.rm = TRUE) * 100,
+            max_tag_mass = max(prop_mass_tag, na.rm = TRUE) * 100,
+            sd_tag_mass = sd(prop_mass_tag, na.rm = TRUE) * 100,
+            mean_all_mass = mean(prop_mass_all, na.rm = TRUE) * 100,
+            median_all_mass = median(prop_mass_all, na.rm = TRUE) * 100,
+            min_all_mass = min(prop_mass_all, na.rm = TRUE) * 100,
+            max_all_mass = max(prop_mass_all, na.rm = TRUE) * 100,
+            sd_all_mass = sd(prop_mass_all, na.rm = TRUE) * 100
+            ) %>%
+  t() %>% as.data.frame() %>% rename(GPS = V1,
+                                                                                                        PTT = V2,
+                                                                                                        # PTT2 = V3,
+                                                                                                        control = V3) %>% slice(-1)
 
 all_caps %>% 
   group_by(ring) %>%
@@ -1216,12 +1216,12 @@ sample_sizes <-
 
 # clean model component names
 mod_comp_names <-
-  data.frame(comp_name = c("Control group SMI (g; baseline intercept))",
-                           "Relative SMI (g) of 1.2g GPS tag group",
-                           "Relative SMI (g) of 1.8g PTT tag group",
-                           "\u0394 SMI (g) in control group",
-                           "Additional \u0394 SMI (g) for 1.2g GPS tag",
-                           "Additional \u0394 SMI (g) for 1.8g PTT tag",
+  data.frame(comp_name = c("Control group SMI (\u011D; baseline intercept))",
+                           "Relative SMI (\u011D) of 1.2g GPS tag group",
+                           "Relative SMI (\u011D) of 1.8-2.0g PTT tag group",
+                           "\u0394 SMI (\u011D) in control group",
+                           "Additional \u0394 SMI (\u011D) for 1.2g GPS tag",
+                           "Additional \u0394 SMI (\u011D) for 1.8-2.0g PTT tag",
                            "Total Marginal \U1D479\U00B2",
                            "Tag type",
                            "Measurement sequence",
@@ -1348,7 +1348,7 @@ print(r.squared)
 
 #### plotting ----
 bdot_treatment_group_facets <- c('GPS' = "1.2g GPS tag", 
-                                 'PTT' = "1.8g PTT tag", 
+                                 'PTT' = "1.8 - 2.0g PTT tag", 
                                  'control' = "control")
 
 bdot_breeding_fate_facets <- c('aband' = "abandoned", 
@@ -1385,12 +1385,13 @@ repeated_measures_ <-
   left_join(sample_sizes, by = c("tag_type", "measure"))
 
 repeated_measures_plot <- 
-  ggplot(data = repeated_measures_) + 
-  geom_line(aes(x = x_line, y = smi_wing, group = ring), color = "grey40", alpha = 0.5) + 
+  ggplot(data = repeated_measures_ %>% mutate(tag_type_ = ifelse(ring %in% c("CP16918", "CP9068", "CP16905"), "PTT2", tag_type))) + 
+  geom_line(aes(x = x_line, y = smi_wing, group = ring, linetype = tag_type_), color = "grey40", alpha = 0.5) + 
   geom_jitter(size = 4, aes(x = x_point, y = smi_wing, fill = tag_type, shape = measure), 
              shape = 21, color = "grey40", alpha = 1, width = 0.075) +
   # scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = custom_colors) +
+  scale_linetype_manual(values = c("solid", "solid", "solid", "dashed")) +
   facet_grid(~ tag_type, labeller = as_labeller(bdot_treatment_group_facets)) +
   theme(legend.position = "none",
         text = element_text(family = "lato"),
@@ -1417,7 +1418,8 @@ repeated_measures_plot <-
   # geom_hline(yintercept = sum(GPS, harness, 4 * colour_band, metal_band) / 0.043,
   #            color = "grey", linetype = "dashed") +
   xlab("capture event") +
-  ylab("scaled body mass\nindex (g)") +
+  ylab(expression("scaled body mass index (" * hat(g) * ")")) +
+  # ylab("scaled body mass\nindex (\u011D)") +
   geom_text(data = repeated_measures_ %>% ungroup() %>% dplyr::select(x_point, n, tag_type) %>% distinct(), aes(label = n, y = 38, x = x_point),  # Adjust 'y' to place the text appropriately
             size = 3, color = "black", vjust = 0)# +
 repeated_measures_plot
@@ -2047,7 +2049,7 @@ tag_type_breeding_fate_plot_ <-
   ylab("fate probability\n(± 95% CI)") +
   xlab("breeding attempt fate") +
   scale_y_continuous(limits = c(-0.2, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
-  scale_x_discrete(labels = c("abandoned", "hatch", "nest failure", "fledged young", "unknown")) +
+  scale_x_discrete(labels = c("aband. nest", "nest hatched", "nest failure", "fledged young", "unknown")) +
   # scale_color_brewer(palette = "Set1") +
   # facet_grid(~ response.level, labeller = as_labeller(bdot_breeding_fate_facets))
   facet_grid(~ x, labeller = as_labeller(bdot_treatment_group_facets)) +
@@ -2275,7 +2277,7 @@ tag_type_surv_p_plot <-
 
 combo_plot <- 
   repeated_measures_plot / plot_spacer() / tag_type_breeding_fate_plot_ / tag_type_surv_p_plot + 
-  plot_layout(heights = c(1, 0.1, 1, 1))
+  plot_layout(heights = c(2, 0.1, 1, 1))
 
 combo_plot
   
@@ -2703,7 +2705,7 @@ all_BADO_tagging_data %>%
 #   mutate(time_days = time/86400) %>% 
 #   ggplot() +
 #   geom_line(aes(y = parent, x = time_days, color = tag_type))
-
+all_BADO_tagging_data %>% filter(tagID %in% c("66903", "66891_2", "66891_1")) %>% pull(ring) %>% unique()
 
 all_BADO_tagging_data %>% 
   filter(site == "KK") %>% 
@@ -2722,8 +2724,8 @@ all_BADO_tagging_data %>%
 
 custom_fill_ <- brewer.pal(9, "Pastel1")[c(2, 3)]
 
-tag_type_facets <- c('GPS' = "1.3g archival GPS tag", 
-                     'PTT' = "1.8g Argos PTT tag")
+tag_type_facets <- c('GPS' = "1.2g archival GPS tag", 
+                     'PTT' = "1.8g & 2.0g* Argos PTT tags")
 
 facets <- 
   data.frame(parent = c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))),
@@ -2757,6 +2759,7 @@ tag_data_plot <-
   # all_BADO_tagging_data %>% 
   # filter(site == "KK") %>% 
     binned_data %>% 
+  # mutate(parent = ifelse(parent %in% c("RBRL", "RRRG", "RRGO"), paste0(parent, "*"), parent) %>% as.factor) %>% 
   # mutate(ring = factor(ring, levels = c("CP9098" , "CP9042" , "CP9055" , "CP9032" , "CP9096" , "CP9066" , "CP16134", "CP16111", "CP16607" ,"CP16617", "CP16918", "CP16905" ,"CP16609", "CP16616", "CP9068" , "CP9099"))) %>%
   mutate(parent = factor(parent,
                          levels = rev(c("RLYL", "RWBG", "RLYR", "RRBR", "RBBY", "RWBY", "RBBR", "RRLR", "RRYY", "RWLB", rev(c("RBOG", "RBGB", "RROW", "RBWO", "RRGO", "RRRG", "RBOY", "RBWR", "RBRL", "RWLG"))))),
@@ -2799,8 +2802,8 @@ tag_data_plot
 
 ggsave(plot = tag_data_plot, 
        filename = "tag_data_time_.png", 
-       path = "tabs_figs/", dpi = 300, 
-       height = 8, width = 8)
+       path = "tabs_figs/", #dpi = 300, 
+       height = 8, width = 8, units = "in")
   
 ```
 
@@ -3244,6 +3247,9 @@ m <-
   #                transform = FALSE,
   #                model = "WGS84",
   #                dist_unit = "km")
+
+nz_bound_crop %>% plot()
+
 m
 install.packages("metR")
 library(metR)
