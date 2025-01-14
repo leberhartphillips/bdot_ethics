@@ -1,5 +1,5 @@
 ---
-title: "Banded Dotterel Tagging Trial"
+title: "Evaluating the effects of tag mass on the breeding success, survival, and body condition of a small-bodied partially migratory shorebird"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 author: 
  - name: Luke Eberhart-Hertel
