@@ -2310,6 +2310,44 @@ combo_plot
 # tag_type_p_plot
 ```
 
+# energy budget estimation
+```{r}
+# Table 5 from:
+# Morrier, A. and McNeil, R., 1991. Time-activity budget of Wilson's and Semipalmated Plovers in a tropical environment. The Wilson Bulletin, pp.598-620.
+Morrier_McNeil_table5 <- 
+  data.frame(
+        Sampling_Sessions = c("18-21 October", "11-12 November", "21-22 November", "1 December", 
+                              "14-16 January", "29-30 January", "15-17 February", "8-9 March", 
+                              "22-24 March", "11-13 April"),
+        Feeding = c(18.38, 3.49, 5.01, 3.28, 2.18, 2.30, 0.39, 3.72, 3.70, 14.83),
+        Preening = c(0.58, 0.29, 0.73, 0.35, 0.86, 0.77, 0.54, 0.24, 0.64, 0.39),
+        Resting = c(8.56, 17.44, 15.89, 17.53, 17.58, 17.53, 19.60, 17.70, 17.81, 10.83),
+        Flight = c(0.34, 1.47, 0.67, 0.02, 0.56, 0.32, 0.00, 0.79, 0.15, 1.02),
+        Walking = c(0.12, 0.18, 0.62, 0.31, 0.35, 0.57, 0.09, 0.06, 0.17, 0.38),
+        Fight = c(0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.06, 0.21),
+        Ground_Display = c(0.00, 0.07, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.58, 0.03),
+        Alert = c(0.62, 0.75, 1.03, 0.48, 0.80, 1.05, 0.75, 1.46, 0.75, 1.73),
+        Running = c(0.03, 0.12, 0.03, 0.00, 0.11, 0.09, 0.00, 0.12, 0.04, 0.32),
+        Nocturnal_Resting = c(21.18, 21.39, 21.42, 21.72, 21.65, 21.50, 21.26, 20.96, 20.70, 20.43),
+        Total_Energy_Expenditure = c(49.81, 45.20, 45.43, 43.70, 44.08, 44.10, 42.63, 45.06, 44.61, 50.17)
+        )
+
+Morrier_McNeil_table5 %>%
+  mutate(across(
+    .cols = c(Feeding, Preening, Resting, Flight, Walking, Fight, 
+              Ground_Display, Alert, Running, Nocturnal_Resting),
+    .fns = ~ (. / Total_Energy_Expenditure) * 100,
+    .names = "prop_{.col}"
+  )) %>%
+  summarise(across(
+    .cols = starts_with("prop_"),
+    .fns = mean,
+    .names = "avg_{.col}"
+  ))
+  
+```
+
+
 # Movements of tagged birds
 ### wrangle GPS data
 ```{r}
