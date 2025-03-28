@@ -1,5 +1,6 @@
 ---
 title: "Evaluating the effects of tag mass on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird"
+subtitle: "Supplementary Material A"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 author: 
  - name: Luke Eberhart-Hertel
