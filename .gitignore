@@ -21,9 +21,8 @@
 !out/breed_results.Rds
 !out/breed_pair_results.Rds
 !out/survival_results.Rds
-!out/behave_results.Rds
 
-!tab_figs/figure_3.png
+!tabs_figs/Figure_3_complete.png
 
 # Ensure that the directories themselves are tracked if empty
 !data/
