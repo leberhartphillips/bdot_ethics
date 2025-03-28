@@ -25,7 +25,7 @@ reproduce our investigation evaluating the effects of tags on banded dotterels
 (*Anarhynchus bicinctus*) breeding in Kaikōura, New Zealand. 
 Our OSF repository (https://osf.io/2rkcw/; DOI: https://doi.org/10.17605/OSF.IO/2RKCW) mirrors this GitHub repository.
 
-For a complete overview of the methods and results presented in our manuscript, please view our project vignette: [Supplementary Material A](https://leberhartphillips.github.io/bdot_ethics/bdot_ethics.html)
+For a complete overview of the methods and results presented in our manuscript, please view our project vignette: [Supplementary Material A](https://leberhartphillips.github.io/bdot_ethics/Supplementary_Material_A.html)
 
 ![](tabs_figs/Figure_3_complete.png)
 
@@ -34,7 +34,7 @@ For a complete overview of the methods and results presented in our manuscript, 
 - [`Supplementary_Material_A.qmd`](https://github.com/leberhartphillips/bdot_ethics/blob/main/bdot_ethics.qmd)
     Quarto source code for vignette of analysis
 - [`Supplementary_Material_A.html`](https://github.com/leberhartphillips/bdot_ethics/blob/main/bdot_ethics.html)
-    HTML vignette of analysis for reproducibility of results. Click [`here`](https://leberhartphillips.github.io/bdot_ethics/bdot_ethics.html) for the rendered document to view in your browser.
+    HTML vignette of analysis for reproducibility of results. Click [`here`](https://leberhartphillips.github.io/bdot_ethics/Supplementary_Material_A.html) for the rendered document to view in your browser.
 - [`bdot_ethics.Rproj`](https://github.com/leberhartphillips/bdot_ethics/blob/main/bdot_ethics.Rproj)
     RStudio project to run and reproduce results
 
