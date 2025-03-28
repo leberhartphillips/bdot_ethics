@@ -27,7 +27,7 @@ Our OSF repository (https://osf.io/2rkcw/; DOI: https://doi.org/10.17605/OSF.IO/
 
 For a complete overview of the methods and results presented in our manuscript, please view our project vignette: [Supplementary Material A](https://leberhartphillips.github.io/bdot_ethics/bdot_ethics.html)
 
-![](/Users/leberhart/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/tabs_figs/Figure_3_complete.png)
+![](/Users/luketheduke2/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/tabs_figs/Figure_3_complete.png)
 
 #### Repository Contents
 
@@ -41,7 +41,7 @@ For a complete overview of the methods and results presented in our manuscript, 
 [**`data/`**](https://github.com/leberhartphillips/bdot_ethics/tree/main/data)
 
 -   data for analysis of repeated measures of body condition
-    [`smi.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/smi.csv)
+    [`body_traits.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/body_traits.csv)
 -   data for breeding fate analysis
     [`breed.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/breed.csv)
 -   data for multi-state apparent survival analysis
@@ -50,17 +50,19 @@ For a complete overview of the methods and results presented in our manuscript, 
     [`behav.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/behav.csv)
 -   data for movement analysis
     [`move.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/move.csv)
+-   tag metadata
+    [`tag_metadata.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/tag_metadata.csv)
 
 [**`out/`**](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/)
 
 -   rds file for analysis of repeated measures of body condition
-    [`smi_results.Rds`](https://github.com/leberhartphillips/coucal_demography/tree/main/output/bootstraps/out/smi_results.Rds)
+    [`smi_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/smi_results.rds)
 -   rds file for breeding fate analysis
-    [`breed_results.Rds`](https://github.com/leberhartphillips/coucal_demography/tree/main/output/bootstraps/out/breed_results.Rds)
+    [`breed_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_results.rds)
 -   rds file for multi-state apparent survival analysis
-    [`survival_results.Rds`](https://github.com/leberhartphillips/coucal_demography/tree/main/output/bootstraps/out/survival_results.Rds)
--   rds file for behavioural analysis
-    [`behave_results.Rds`](https://github.com/leberhartphillips/coucal_demography/tree/main/output/bootstraps/out/behave_results.Rds)
+    [`survival_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/survival_results.rds)
+-   rds file for breeding fate analysis (of pairs)
+    [`breed_pair_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_results.rds)
 
 [**`tab_figs/`**](https://github.com/leberhartphillips/bdot_ethics/tree/main/tab_figs)
 folder containing the graphic in the Readme
