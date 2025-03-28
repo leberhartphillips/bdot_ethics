@@ -27,7 +27,7 @@ Our OSF repository (https://osf.io/2rkcw/; DOI: https://doi.org/10.17605/OSF.IO/
 
 For a complete overview of the methods and results presented in our manuscript, please view our project vignette: [Supplementary Material A](https://leberhartphillips.github.io/bdot_ethics/bdot_ethics.html)
 
-![](/Users/luketheduke2/ownCloud/kemp_projects/bdot/R_projects/bdot_ethics/tabs_figs/Figure_3_complete.png)
+![](tabs_figs/Figure_3_complete.png)
 
 #### Repository Contents
 
