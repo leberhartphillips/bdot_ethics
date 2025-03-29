@@ -31,9 +31,9 @@ For a complete overview of the methods and results presented in our manuscript, 
 
 #### Repository Contents
 
-- [`Supplementary_Material_A.qmd`](https://github.com/leberhartphillips/bdot_ethics/blob/main/bdot_ethics.qmd)
+- [`Supplementary_Material_A.qmd`](https://github.com/leberhartphillips/bdot_ethics/blob/main/Supplementary_Material_A.qmd)
     Quarto source code for vignette of analysis
-- [`Supplementary_Material_A.html`](https://github.com/leberhartphillips/bdot_ethics/blob/main/bdot_ethics.html)
+- [`Supplementary_Material_A.html`](https://github.com/leberhartphillips/bdot_ethics/blob/main/Supplementary_Material_A.html)
     HTML vignette of analysis for reproducibility of results. Click [`here`](https://leberhartphillips.github.io/bdot_ethics/Supplementary_Material_A.html) for the rendered document to view in your browser.
 - [`bdot_ethics.Rproj`](https://github.com/leberhartphillips/bdot_ethics/blob/main/bdot_ethics.Rproj)
     RStudio project to run and reproduce results
@@ -63,6 +63,3 @@ For a complete overview of the methods and results presented in our manuscript, 
     [`survival_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/survival_results.rds)
 -   rds file for breeding fate analysis (of pairs)
     [`breed_pair_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_results.rds)
-
-[**`tab_figs/`**](https://github.com/leberhartphillips/bdot_ethics/tree/main/tab_figs)
-folder containing the graphic in the Readme
