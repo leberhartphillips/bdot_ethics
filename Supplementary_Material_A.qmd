@@ -717,6 +717,14 @@ breed_fates %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
                 full_width = FALSE)
 
+breed_fates %>% 
+  group_by(parent, tag_type) %>% 
+  summarise(n_seasons = n_distinct(season)) %>% 
+  filter(tag_type != "control") %>% 
+  table()
+
+breed_fates %>% filter(parent == "RBBR")
+
 breed_fates %>%
   dplyr::select(nest_id, state) %>% 
   distinct() %>%
