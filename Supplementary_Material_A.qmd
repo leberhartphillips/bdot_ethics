@@ -201,7 +201,7 @@ GPS = 1.2
 ## PCA of structural traits
 ```{r}
 body_traits <- 
-  read.csv(here("data/body_traits.csv"))
+  read.csv(here("data/body_traits_season.csv"))
 ```
 
 #### check most relevent structural traits with PCA
@@ -228,9 +228,9 @@ body_traits_pca_scores <-
   arrange(measure) %>% 
   slice(1) %>% 
   bind_cols(., body_traits_pca$scores[, 1], body_traits_pca$scores[, 2], body_traits_pca$scores[, 3]) %>% 
-  rename(structure_pc1 = `...10`,
-         structure_pc2 = `...11`,
-         structure_pc3 = `...12`) %>% 
+  rename(structure_pc1 = `...13`,
+         structure_pc2 = `...14`,
+         structure_pc3 = `...15`) %>% 
   na.omit() %>%
   ungroup()
 ```
@@ -286,7 +286,7 @@ ggplot(body_traits_pca_scores,
   theme_minimal()
 ```
 
-### Scaled Mass Index wrangle
+## Scaled Mass Index wrangle
 average all repeated measures of structural traits for each bird (i.e., variation within individuals for these traits is assumed to be observer/instrument error)
 ```{r}
 body_traits_avg <- 
@@ -301,7 +301,7 @@ body_traits_avg <-
 see text in Peig and Green (2009) after Eq. 2: "...We recommend the use of the single 'L' variable which has the strongest correlation with M on a log-log scale, since this is likely to be the L that best explains that fraction of mass associated with structural size"
 Conclude to use wing for SMI transformation because it has the largest r and based on the PCA investigation above, wing did just as good as PC1 when explaining variation in weight
 ```{r}
-cor.test(log(body_traits_avg$tarsus), log(body_traits_avg$weight)) # r = 0.127
+cor.test(log(body_traits_avg$tarsus), log(body_traits_avg$weight)) # r = 0.130
 cor.test(log(body_traits_avg$wing), log(body_traits_avg$weight)) # r = 0.226
 cor.test(log(body_traits_avg$culmen), log(body_traits_avg$weight)) # r = 0.090
 ```
@@ -324,7 +324,7 @@ body_traits_smi <-
   body_traits_avg  %>% 
   filter(!is.na(weight)) %>% 
   bind_cols(., smi_) %>% 
-  dplyr::select(ring, tag_type, tag_type_, treatment_group, measure, SMI.ols, weight) %>% 
+  dplyr::select(ring, tag_type, tag_type_, treatment_group, measure, SMI.ols, weight, day_of_year, date_diff) %>% 
   na.omit() %>% 
   rename(smi_wing = SMI.ols)
 ```
@@ -340,7 +340,7 @@ ggplot(body_traits_smi,
   scale_color_brewer(palette = "Dark2", name = "tag type")
 ```
 
-### Scaled Mass Index sequential measures model
+## Scaled Mass Index sequential measures model
 
 #### sample size summary
 ```{r, echo=FALSE}
@@ -409,7 +409,7 @@ body_traits_smi %>%
          PTT = ifelse(!is.infinite(PTT) | !is.na(PTT), floor(as.numeric(PTT) * 10) / 10, NA),
          control = ifelse(!is.infinite(control) | !is.na(control), floor(as.numeric(control) * 10) / 10, NA)) %>% 
   mutate(unit = ifelse(str_detect(statistic, "SMI"), "scaled mass index", "raw body mass"),
-         attachment = ifelse(str_detect(statistic, "tag"), "only tag", "all attachments"),
+         attachment = ifelse(str_detect(statistic, "tag"), "only tracking device", "all attachments"),
          statistic = ifelse(str_detect(statistic, "mean"), "mean", 
                             ifelse(str_detect(statistic, "median"), "median", 
                                    ifelse(str_detect(statistic, "min"), "min",
@@ -453,27 +453,41 @@ body_traits_smi %>%
   )
 ```
 
+#### sample size summary
+```{r, echo=FALSE}
+body_traits_smi %>% 
+  group_by(tag_type) %>% 
+  summarise(n = n_distinct(ring))
+```
+
+### distribution of time differences between repeated measures
+```{r}
+hist(as.numeric(body_traits_smi$date_diff))
+body_traits_smi %>% filter(!is.na(date_diff)) %>% pull(date_diff) %>% min()
+body_traits_smi %>% filter(!is.na(date_diff)) %>% pull(date_diff) %>% max()
+```
+
 ### modelling
 ```{r, eval=FALSE}
-smi_wing_lmer <- 
-  lmer(smi_wing ~ tag_type * measure + (1 | ring), 
-       data = body_traits_smi, REML = TRUE)
+smi_wing_lmer_DOY_season <- lme4::lmer(
+  smi_wing ~ tag_type * measure + scale(day_of_year) + (1 | ring),
+  data = body_traits_smi, REML = TRUE
+)
 ```
 
 ### contrast interactive and non-interactive model
 ```{r}
-smi_wing_lmer_interaction <- 
-  lmer(smi_wing ~ tag_type * measure + (1 | ring), 
+smi_wing_lmer_DOY_season_interaction <- 
+  lmer(smi_wing ~ tag_type * measure + scale(day_of_year) + (1 | ring), 
        data = body_traits_smi, REML = FALSE)
 
-smi_wing_lmer_noninteraction <- 
-  lmer(smi_wing ~ tag_type + measure + (1 | ring), 
+smi_wing_lmer_DOY_season_noninteraction <- 
+  lmer(smi_wing ~ tag_type + measure + scale(day_of_year) + (1 | ring), 
        data = body_traits_smi, REML = FALSE)
 ```
 
-
 ```{r, echo=FALSE}
-anova_results <- anova(smi_wing_lmer_interaction, smi_wing_lmer_noninteraction, test = "Chisq") %>%
+anova_results <- anova(smi_wing_lmer_DOY_season_interaction, smi_wing_lmer_DOY_season_noninteraction, test = "Chisq") %>%
   broom::tidy()
 
 anova_results %>%
@@ -487,12 +501,12 @@ anova_results %>%
 set.seed(1234)
 
 # Derive confidence intervals of effect sizes from parametric bootstrapping
-tidy_smi_wing_lmer <-
-  tidy(smi_wing_lmer, conf.int = TRUE, conf.method = "boot", nsim = 1000)
+tidy_smi_wing_lmer_DOY_season <-
+  tidy(smi_wing_lmer_DOY_season, conf.int = TRUE, conf.method = "boot", nsim = 1000)
 
 # run rptR to obtain repeatabilities of random effects
-rpt_smi_wing_lmer <-
-  rpt(smi_wing ~ tag_type * measure + (1 | ring),
+rpt_smi_wing_lmer_DOY_season <-
+  rpt(smi_wing ~ tag_type * measure + scale(day_of_year) + (1 | ring),
       grname = c("ring", "Fixed"),
       data = body_traits_smi,
       datatype = "Gaussian",
@@ -501,39 +515,45 @@ rpt_smi_wing_lmer <-
 
 # run partR2 on each model to obtain marginal R2, parameter estimates, and beta
 # weights
-R2m_smi_wing_lmer <-
-  partR2(smi_wing_lmer,
+R2m_smi_wing_lmer_DOY_season <-
+  partR2(smi_wing_lmer_DOY_season,
          partvars = c("tag_type",
-                      "measure"),
+                      "measure",
+                      "scale(day_of_year)"),
          R2_type = "marginal",
          nboot = 1000,
          CI = 0.95,
          max_level = 1)
 
-R2c_smi_wing_lmer <-
-  partR2(smi_wing_lmer,
+R2c_smi_wing_lmer_DOY_season <-
+  partR2(smi_wing_lmer_DOY_season,
          partvars = c("tag_type",
-                      "measure"),
+                      "measure",
+                      "scale(day_of_year)"),
          R2_type = "conditional",
          nboot = 1000,
          CI = 0.95,
          max_level = 1)
 
-stats_smi_wing_lmer <-
-  list(mod = smi_wing_lmer,
-       tidy = tidy_smi_wing_lmer,
-       rptR = rpt_smi_wing_lmer,
-       partR2m = R2m_smi_wing_lmer,
-       partR2c = R2c_smi_wing_lmer,
+stats_smi_wing_lmer_DOY_season <-
+  list(mod = smi_wing_lmer_DOY_season,
+       tidy = tidy_smi_wing_lmer_DOY_season,
+       rptR = rpt_smi_wing_lmer_DOY_season,
+       partR2m = R2m_smi_wing_lmer_DOY_season,
+       partR2c = R2c_smi_wing_lmer_DOY_season,
        data = body_traits_smi)
 ```
 
+```{r, eval=FALSE}
+# saveRDS(stats_smi_wing_lmer_DOY_season, here("out/smi_date_results.rds"))
+```
+
 ```{r, echo = FALSE}
-stats_smi_wing_lmer <- readRDS(here("out/smi_results.rds"))
+stats_smi_wing_lmer_DOY_season <- readRDS(here("out/smi_date_results.rds"))
 #### Table of effect sizes ----
 # Retrieve sample sizes
 sample_sizes <-
-  stats_smi_wing_lmer$data %>%
+  stats_smi_wing_lmer_DOY_season$data %>%
   ungroup() %>%
   summarise(Individual = n_distinct(ring),
             Observations = nrow(.))
@@ -549,12 +569,17 @@ mod_comp_names <-
   data.frame(comp_name = c("Intercept (control group 1st capture)",
                            "GPS group 1st capture",
                            "PTT group 1st capture",
-                           "Control group 2nd capture",
-                           "GPS group 2nd capture",
-                           "PTT group 2nd capture",
+                           "Control group 2nd capture (between seasons)",
+                           "Control group 2nd capture (within season)",
+                           "Julian date of measure",
+                           "GPS group 2nd capture (between seasons)",
+                           "PTT group 2nd capture (between seasons)",
+                           "GPS group 2nd capture (within season)",
+                           "PTT group 2nd capture (within season)",
                            "Total Marginal \U1D479\U00B2",
-                           "Tag type",
+                           "Tracking device type",
                            "Measurement sequence",
+                           "Julian date of measure",
                            "Total Conditional \U1D479\U00B2",
                            "Individual",
                            "Residual",
@@ -565,7 +590,7 @@ mod_comp_names <-
 
 # Fixed effect sizes (non-standardized)
 fixefTable <-
-  stats_smi_wing_lmer$tidy %>%
+  stats_smi_wing_lmer_DOY_season$tidy %>%
   dplyr::filter(effect == "fixed") %>%
   dplyr::select(term, estimate, conf.low, conf.high) %>%
   as.data.frame() %>%
@@ -573,7 +598,7 @@ fixefTable <-
 
 # Fixed effect sizes (standardized)
 fixef_bw_Table <-
-  stats_smi_wing_lmer$partR2m$BW %>%
+  stats_smi_wing_lmer_DOY_season$partR2m$BW %>%
   as.data.frame() %>%
   mutate(stat = "fixed_bw") %>%
   rename(conf.low = CI_lower,
@@ -581,8 +606,8 @@ fixef_bw_Table <-
 
 # Semi-partial R2 estimates
 R2Table <-
-  bind_rows(stats_smi_wing_lmer$partR2m$R2,
-            stats_smi_wing_lmer$partR2c$R2[1,]) %>%
+  bind_rows(stats_smi_wing_lmer_DOY_season$partR2m$R2,
+            stats_smi_wing_lmer_DOY_season$partR2c$R2[1,]) %>%
   dplyr::select(term, estimate, CI_lower, CI_upper) %>%
   as.data.frame() %>%
   mutate(stat = "partR2") %>%
@@ -591,7 +616,7 @@ R2Table <-
 
 # Random effects variances
 ranefTable <-
-  stats_smi_wing_lmer$tidy %>%
+  stats_smi_wing_lmer_DOY_season$tidy %>%
   dplyr::filter(effect == "ran_pars") %>%
   dplyr::select(group, estimate, conf.low, conf.high) %>%
   as.data.frame() %>%
@@ -603,7 +628,7 @@ ranefTable <-
 
 # Adjusted repeatabilities
 coefRptTable <-
-  stats_smi_wing_lmer$rptR$R_boot %>%
+  stats_smi_wing_lmer_DOY_season$rptR$R_boot %>%
   dplyr::select(-Fixed) %>%
   mutate(residual = 1 - rowSums(.)) %>%
   apply(., 2,
@@ -649,11 +674,11 @@ smi_wing_lmer_table <-
              estimate = "Mean estimate",
              coefString = "95% confidence interval") %>%
   fmt_number(columns = c(estimate),
-             rows = 1:14,
+             rows = 1:18,
              decimals = 2,
              use_seps = FALSE) %>%
   fmt_number(columns = c(estimate),
-             rows = 15:16,
+             rows = 19:20,
              decimals = 0,
              use_seps = FALSE) %>%
   sub_missing(columns = 1:4,
@@ -671,6 +696,11 @@ smi_wing_lmer_table <-
               table.width = pct(50))
 
 smi_wing_lmer_table
+```
+
+```{r, eval=FALSE, include=FALSE, echo=FALSE}
+gtsave(smi_wing_lmer_table %>% tab_options(table.width = pct(60)), 
+       here("tabs_figs/table_1_.png"))
 ```
 
 # Breeding status and outcome
