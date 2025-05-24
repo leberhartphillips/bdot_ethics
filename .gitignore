@@ -17,7 +17,7 @@
 !data/NZL_water_areas_dcw.shx
 !data/NZL_water_areas_dcw.shp
 
-!out/smi_results.Rds
+!out/smi_date_results.Rds
 !out/breed_results.Rds
 !out/breed_pair_results.Rds
 !out/survival_results.Rds
