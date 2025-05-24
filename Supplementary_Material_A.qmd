@@ -75,7 +75,8 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 packages_required_in_project <-
   c("apis", "BaSTA", "brms", "broom.mixed", "colorspace", "corrplot", "data.table", 
     "effects", "elevatr", "geosphere", "ggblend", "ggeffects", "ggmap",
-    "ggnewscale", "ggsn", "giscoR", "glue", "googlesheets4", "gt", "gtsummary", 
+    "ggnewscale", #"ggsn", 
+    "giscoR", "glue", "googlesheets4", "gt", "gtsummary", 
     "here", "hms", "lme4", "lubridate", "mapview", "mgcv", "multcomp", "MuMIn", "nnet", 
     "partR2", "patchwork", "RColorBrewer", "readxl", "remotes", "RMark", "rnaturalearth", 
     "rptR", "scales", "sf", "showtext", "smatr", "sp", "stringr", "tidybayes", 
@@ -544,7 +545,7 @@ stats_smi_wing_lmer_DOY_season <-
 ```
 
 ```{r, eval=FALSE}
-saveRDS(stats_smi_wing_lmer_DOY_season, here("out/smi_date_results.rds"))
+# saveRDS(stats_smi_wing_lmer_DOY_season, here("out/smi_date_results.rds"))
 ```
 
 ```{r, echo = FALSE}
