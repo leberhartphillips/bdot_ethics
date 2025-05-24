@@ -325,7 +325,6 @@ body_traits_smi <-
   filter(!is.na(weight)) %>% 
   bind_cols(., smi_) %>% 
   dplyr::select(ring, tag_type, tag_type_, treatment_group, measure, SMI.ols, weight, day_of_year, date_diff) %>% 
-  na.omit() %>% 
   rename(smi_wing = SMI.ols)
 ```
 
@@ -545,7 +544,7 @@ stats_smi_wing_lmer_DOY_season <-
 ```
 
 ```{r, eval=FALSE}
-# saveRDS(stats_smi_wing_lmer_DOY_season, here("out/smi_date_results.rds"))
+saveRDS(stats_smi_wing_lmer_DOY_season, here("out/smi_date_results.rds"))
 ```
 
 ```{r, echo = FALSE}
@@ -674,11 +673,11 @@ smi_wing_lmer_table <-
              estimate = "Mean estimate",
              coefString = "95% confidence interval") %>%
   fmt_number(columns = c(estimate),
-             rows = 1:18,
+             rows = 1:19,
              decimals = 2,
              use_seps = FALSE) %>%
   fmt_number(columns = c(estimate),
-             rows = 19:20,
+             rows = 20:21,
              decimals = 0,
              use_seps = FALSE) %>%
   sub_missing(columns = 1:4,
@@ -754,6 +753,122 @@ breed_fates %>%
   kable(format = "html", caption = "number of distinct birds for each treatment") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
                 full_width = FALSE)
+
+breed_fates %>% 
+  group_by(tag_type) %>% 
+  dplyr::summarise(n_ind = n_distinct(parent)) %>% 
+  kable(format = "html", caption = "number of distinct birds for each treatment") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE)
+```
+
+## check if breeding fates of sebsequent seasons with the treatment are different than the deployment season
+```{r}
+# Determine first treatment season per parent and tag_type
+first_treatment_season <- breed_fates %>%
+  filter(tag_type %in% c("GPS", "PTT")) %>%
+  group_by(parent, tag_type) %>%
+  summarise(first_treatment = min(season), .groups = "drop")
+
+# Join back to main data and classify treatment stage
+breed_fates_ <- breed_fates %>%
+  left_join(first_treatment_season, by = c("parent", "tag_type")) %>%
+  mutate(
+    treatment_stage = case_when(
+      tag_type == "control" ~ "control",
+      season == first_treatment ~ "first_treatment_season",
+      season > first_treatment ~ "subsequent_treatment_season",
+      TRUE ~ NA_character_
+    )
+  ) %>% 
+  mutate(treatment_stage = relevel(factor(treatment_stage), 
+                                   ref = "control"))
+# set seed for reproducibility
+set.seed(1234)
+
+breed_brm2 <- brm(
+  state ~ treatment_stage + (1 | season) + (1 | parent),
+  data = breed_fates_,
+  family = categorical(link = "logit"),
+  chains = 4,
+  iter = 4000,
+  control = list(adapt_delta = 0.99, max_treedepth = 15)
+)
+
+# consolidate results
+stats_breed_brm_ <-
+  list(mod = breed_brm2,
+       data = breed_fates_)
+
+predictions_treatment_stage <- 
+  ggpredict(stats_breed_brm_$mod, 
+            terms = "treatment_stage", 
+            type = "fixed", 
+            bias_correction = TRUE
+            ) %>% 
+  as.data.frame()
+
+facet_labels <- c(
+  "aband" = "abandoned",
+  "brood" = "hatched",
+  "fail" = "failed",
+  "fledge" = "fledged"
+)
+
+# Assuming 'nest_fates' is your data frame
+# Calculate the sample sizes
+sample_sizes <- stats_breed_brm_$data %>%
+  group_by(treatment_stage, state) %>%
+  summarise(n = n(),
+            n_nests = n_distinct(nest_id)) %>%
+  ungroup() %>% 
+  rename(x = treatment_stage, 
+         response.level = state) %>% 
+  arrange(x, response.level)
+
+# Merge the sample sizes with your predictions
+predictions_treatment_stage <-
+  predictions_treatment_stage %>%
+  left_join(sample_sizes, by = c("x", "response.level")) %>% 
+  mutate(response.level = factor(response.level, levels = c("aband", "fail", "brood", "fledge")))
+
+custom_colors_ <- brewer.pal(9, "Set1")[c(9, 3, 2)]
+
+bdot_treatment_stage_facets <- c('control' = "control", 
+                                 'first_treatment_season' = "deployment season", 
+                                 'subsequent_treatment_season' = "subsequent season")
+
+# treatment_stage_breeding_fate_plot_ <-
+  ggplot(data = predictions_treatment_stage) +
+  geom_errorbar(aes(x = response.level, y = predicted, ymin = conf.low, ymax = conf.high, color = x), 
+               size = 0.3, linetype = "solid", width = 0.1) +
+  geom_point(aes(x = response.level, y = predicted, fill = x, shape = response.level), size = 4, color = "black", alpha = 1) +
+  # scale_fill_manual(values = custom_colors) +
+  # scale_color_manual(values = custom_colors_) +
+  geom_text(aes(label = n_nests, y = -0.2, x = response.level),
+            size = 3, color = "black", vjust = 0) + 
+  theme(legend.position = "none",
+        text = element_text(family = "Verdana"),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 11, colour = "black"),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10, colour = "black", angle = 45, hjust = 1),
+        plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
+        panel.background = element_rect(fill = 'transparent', color = NA),
+        plot.background = element_rect(fill = 'transparent', color = NA), 
+        strip.background = element_rect(fill = 'grey90', color = NA),
+        # strip.text = element_blank(),
+        panel.spacing = unit(1, "cm"),
+        panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  ylab("fate probability\n± 95% CrI") +
+  xlab("breeding attempt fate") +
+  scale_y_continuous(limits = c(-0.2, 1), breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_x_discrete(labels = c("abandoned", "failure", "hatched", "fledged")) +
+  facet_grid(~ x, labeller = as_labeller(bdot_treatment_stage_facets)) +
+  scale_shape_manual(values = c(21, 22, 23, 24, 25))
 ```
 
 ### modelling
@@ -821,7 +936,7 @@ surv_estimates <-
 # Figure 2 - multi-panelled plot of all results
 ```{r, echo=FALSE}
 ## scaled mass index plot
-stats_smi_wing_lmer <- readRDS(here("out/smi_results.rds"))
+stats_smi_wing_lmer <- readRDS(here("out/smi_date_results.rds"))
 
 sample_sizes <-
   stats_smi_wing_lmer$data %>%
@@ -831,12 +946,26 @@ sample_sizes <-
   mutate(n = as.character(n)) %>% 
   mutate(n = ifelse(tag_type %in% c("GPS", "PTT") & measure == "second", paste0(n, "*"), n))
 
+# repeated_measures_ <- 
+#   stats_smi_wing_lmer$data %>%
+#   mutate(x_line = ifelse(measure == "first", as.numeric(factor(measure)) + 0.15,
+#                          ifelse(measure == "second", as.numeric(factor(measure)) - 0.15, NA)),
+#          x_point = ifelse(measure == "first", as.numeric(factor(measure)), 
+#                           ifelse(measure == "second", as.numeric(factor(measure)), NA))) %>% 
+#   left_join(sample_sizes, by = c("tag_type", "measure"))
+
 repeated_measures_ <- 
   stats_smi_wing_lmer$data %>%
-  mutate(x_line = ifelse(measure == "first", as.numeric(factor(measure)) + 0.15,
-                         ifelse(measure == "second", as.numeric(factor(measure)) - 0.15, NA)),
-         x_point = ifelse(measure == "first", as.numeric(factor(measure)), 
-                          ifelse(measure == "second", as.numeric(factor(measure)), NA))) %>% 
+  mutate(x_line = ifelse(measure == "first", 1 + 0.15,
+                         ifelse(measure == "second_within", 
+                                2 - 0.15,
+                         ifelse(measure == "second_between", 
+                                3 - 0.15, NA))),
+         x_point = ifelse(measure == "first", 1, 
+                          ifelse(measure == "second_within", 
+                                 2, 
+                          ifelse(measure == "second_between", 
+                                 3, NA)))) %>% 
   left_join(sample_sizes, by = c("tag_type", "measure"))
 
 bdot_treatment_group_facets <- c('GPS' = "1.2g GPS tag", 
@@ -869,7 +998,7 @@ repeated_measures_plot <-
         panel.grid.major.y = element_line(size = 0.25, lineend = "round", colour = "grey90"),
         panel.grid.minor = element_blank(),
         panel.grid.major.x = element_blank()) +
-  scale_x_continuous(limits = c(0.8, 2.2), breaks = c(1, 2), labels = c("first\ncapture", "second\ncapture")) +
+  scale_x_continuous(limits = c(0.8, 3.2), breaks = c(1, 2, 3), labels = c("1st\ncapture", "2nd\nwithin\nseason", "2nd\nbetween\nseason")) +
   scale_y_continuous(breaks = c(50, 60, 70), limits = c(38, 80)) +
   xlab("capture event") +
   ylab(expression("scaled body mass index (" * hat(g) * ")")) +
@@ -977,7 +1106,7 @@ tag_type_surv_p_plot <-
         axis.ticks = element_blank(),
         axis.title.y = element_text(size = 11, colour = "black"),
         axis.text.y = element_text(size = 10),
-        axis.text.x = element_text(size = 10, colour = "black", angle = 45, hjust = 1),
+        axis.text.x = element_text(size = 10, colour = "black"),
         plot.margin = unit(c(0.2,0.2,0.2,0.2), "cm"),
         panel.spacing = unit(1, "cm"),
         panel.background = element_rect(fill = 'white', color = NA),
@@ -1007,6 +1136,11 @@ combo_plot <-
   )
 
 combo_plot
+
+ggsave(plot = combo_plot,
+       filename = "figure_2_no_unkn_.png",
+       path = here("tabs_figs/"), dpi = 300,
+       height = 10, width = 8, units = "in")
 ```
 
 # Behavioural Observations
@@ -1145,10 +1279,10 @@ tag_metadata <- read.csv(here("data/tag_metadata.csv"))
 tag_metadata %>% 
   filter(tag_type != "control") %>% 
   group_by(tag_type) %>% 
-  summarise(mean = mean(deploy_duration, na.rm = TRUE),
-            max = max(deploy_duration, na.rm = TRUE),
-            min = min(deploy_duration, na.rm = TRUE)) %>%
-  kable(format = "html", caption = "summary of deployment duration (days)") %>%
+  summarise(mean = mean(deploy_duration, na.rm = TRUE)/7,
+            max = max(deploy_duration, na.rm = TRUE)/7,
+            min = min(deploy_duration, na.rm = TRUE)/7) %>%
+  kable(format = "html", caption = "summary of deployment duration (weeks)") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
                 full_width = FALSE)
 ```
@@ -1159,11 +1293,12 @@ move <- read.csv(here("data/move.csv"))
 
 ```{r, echo=FALSE}
 move %>% 
-  group_by(parent, tag_type) %>% 
+  group_by(parent, tag_type) %>%
   summarise(total_fixes = n(),
-            max_time = max(time_since_deployment, na.rm = TRUE)) %>% 
+            max_time = max(as.numeric(time_since_deployment), na.rm = TRUE)) %>% 
   rowwise() %>% 
-  mutate(max_time_weeks = as.numeric(max_time, units = "weeks")) %>% arrange(max_time) %>% 
+  mutate(max_time_weeks = (max_time / 60 / 60 / 24 / 7)) %>% 
+  arrange(max_time) %>% 
   mutate(fixes_per_week = total_fixes/max_time_weeks) %>% 
   group_by(tag_type) %>% 
   summarise(mean = mean(fixes_per_week),
@@ -1190,11 +1325,11 @@ move %>%
   summarise(total_fixes = n(),
             max_time = max(time_since_deployment, na.rm = TRUE)) %>% 
   group_by(tag_type) %>% 
-  summarise(mean = mean(max_time)/86400,
-            sd = sd(max_time)/86400,
-            min = min(max_time)/86400,
-            max = max(max_time)/86400) %>%
-  kable(format = "html", caption = "summary of operational duration (days)") %>%
+  summarise(mean = mean(max_time)/86400/7,
+            sd = sd(max_time)/86400/7,
+            min = min(max_time)/86400/7,
+            max = max(max_time)/86400/7) %>%
+  kable(format = "html", caption = "summary of operational duration (weeks)") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
                 full_width = FALSE)
 ```
