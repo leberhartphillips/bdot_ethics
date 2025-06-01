@@ -21,6 +21,7 @@
 !out/breed_results.Rds
 !out/breed_pair_results.Rds
 !out/survival_results.Rds
+!out/breed_carryover_season.rds
 
 !tabs_figs/Figure_3_complete.png
 

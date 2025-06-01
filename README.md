@@ -1,6 +1,6 @@
 # Reproducible datasets and code for:
 
-## Evaluating the effects of tag mass on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird
+## Evaluating the effects of tracker device mass on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird
 
 ### *Submitted* for peer-review
 
@@ -62,4 +62,6 @@ For a complete overview of the methods and results presented in our manuscript, 
 -   rds file for multi-state apparent survival analysis
     [`survival_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/survival_results.rds)
 -   rds file for breeding fate analysis (of pairs)
-    [`breed_pair_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_results.rds)
+    [`breed_pair_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_pair_results.rds)
+-   rds file for breeding fate analysis (of seasonal carryover effects)
+    [`breed_carryover_season.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_carryover_season.rds)
