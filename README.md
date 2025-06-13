@@ -1,8 +1,8 @@
 # Reproducible datasets and code for:
 
-## Evaluating the effects of tracker device mass on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird
+## Evaluating the effects of tracking devices on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird
 
-### *Submitted* for peer-review
+### [*Journal of Avian Biology* 10.1002/jav.03490](https://doi.org/10.1002/jav.03490)
 
 #### Luke Eberhart-Hertel<sup>1</sup>, Emma M. Williams<sup>2</sup>, Ailsa McGilvary-Howard<sup>3</sup>, Ted Howard<sup>3</sup>, Tony Habraken<sup>4</sup>, Colin F. J. O’Donnell<sup>2</sup>, Clemens Küpper<sup>5</sup>, and Bart Kempenaers<sup>1</sup>
 
@@ -41,7 +41,7 @@ For a complete overview of the methods and results presented in our manuscript, 
 [**`data/`**](https://github.com/leberhartphillips/bdot_ethics/tree/main/data)
 
 -   data for analysis of repeated measures of body condition
-    [`body_traits.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/body_traits.csv)
+    [`body_traits_season.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/body_traits_season.csv)
 -   data for breeding fate analysis
     [`breed.csv`](https://github.com/leberhartphillips/bdot_ethics/tree/main/data/breed.csv)
 -   data for multi-state apparent survival analysis
@@ -56,12 +56,12 @@ For a complete overview of the methods and results presented in our manuscript, 
 [**`out/`**](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/)
 
 -   rds file for analysis of repeated measures of body condition
-    [`smi_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/smi_results.rds)
+    [`smi_date_results.rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/smi_date_results.rds)
 -   rds file for breeding fate analysis
-    [`breed_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_results.rds)
+    [`breed_results.rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_results.rds)
 -   rds file for multi-state apparent survival analysis
-    [`survival_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/survival_results.rds)
+    [`survival_results.rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/survival_results.rds)
 -   rds file for breeding fate analysis (of pairs)
-    [`breed_pair_results.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_pair_results.rds)
+    [`breed_pair_results.rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_pair_results.rds)
 -   rds file for breeding fate analysis (of seasonal carryover effects)
-    [`breed_carryover_season.Rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_carryover_season.rds)
+    [`breed_carryover_season.rds`](https://github.com/leberhartphillips/bdot_ethics/tree/main/out/breed_carryover_season.rds)

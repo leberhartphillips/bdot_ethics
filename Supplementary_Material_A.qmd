@@ -1,6 +1,6 @@
 ---
-title: "Evaluating the effects of tracking device mass on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird"
-subtitle: "Supplementary Material A"
+title: "Evaluating the effects of tracking devices on survival, breeding success, behaviour, and condition of a small, partially migratory shorebird"
+subtitle: "Supplementary Material A: Journal of Avian Biology 10.1002/jav.03490"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 author: 
  - name: Luke Eberhart-Hertel
@@ -703,6 +703,10 @@ smi_wing_lmer_table
 ```{r, eval=FALSE, include=FALSE, echo=FALSE}
 gtsave(smi_wing_lmer_table %>% tab_options(table.width = pct(60)), 
        here("tabs_figs/table_1_.png"))
+```
+
+```{r}
+gtsave(smi_wing_lmer_table, here("tabs_figs/table_1.rtf"))
 ```
 
 # Breeding status and outcome
